@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wave Check - Amazon DAP8</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <script src="https://www.gstatic.com/firebasejs/9.6.7/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.7/firebase-firestore-compat.js"></script>
+</head>
+<body>
+
+    <header>
+        <div class="header-content">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/a/a9/Amazon_logo.svg" alt="Amazon Logo" class="amazon-logo">
+            <div class="header-title">Amazon DAP8 Wave Check</div>
+            <nav>
+                <a href="index.html" class="active">Wave Check</a>
+                <a href="caproster.html">CapRoster</a>
+                <a href="dashboard.html">Dashboard</a>
+                <a href="dalist.html">DA - List</a>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <div class="page-title">
+            <h2>Driver Check-In</h2>
+        </div>
+
+        <div class="check-in-container">
+             <form id="check-in-form">
+                <input type="text" id="badge-id-input" placeholder="Scan or Type Badge ID and Press Enter" required autocomplete="off">
+                <button type="submit" class="action-btn">Check In</button>
+            </form>
+        </div>
+
+        <div class="info-container">
+            <div id="driver-info-box" class="driver-info-box">
+                <p class="placeholder-text">Scan a driver's Badge ID to begin.</p>
+            </div>
+        </div>
+    </main>
+    
+    <footer>
+        <p>&copy; Developed and Coded by Karim Elbeih Badawy (DAP8 Night Shift)</p>
+    </footer>
+
+<script>
+    // --- Firebase Configuration ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyAsuz3Zq8IlV-JRDY4t0n2rbj6cTe1ipOY",
+      authDomain: "dap8-wave-check-v2.firebaseapp.com",
+      projectId: "dap8-wave-check-v2",
+      storageBucket: "dap8-wave-check-v2.firebasestorage.app",
+      messagingSenderId: "519755043298",
+      appId: "1:519755043298:web:4082cb0e75bdcc7c8529bb"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    db.settings({ experimentalForceLongPolling: true });
+
+    const dailyRosterDocRef = db.collection('daily_roster').doc('current');
+    const driversCollectionRef = db.collection('drivers');
+    const logsCollectionRef = db.collection('logs');
+
+    // --- DOM Elements ---
+    const checkInForm = document.getElementById('check-in-form');
+    const badgeIdInput = document.getElementById('badge-id-input');
+    const driverInfoBox = document.getElementById('driver-info-box');
+
+    /**
+     * Creates a log entry in the database.
+     */
+    const createLog = (message, type = 'info') => {
+        logsCollectionRef.add({
+            message: message,
+            type: type,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
+    };
+
+    /**
+     * The main check-in logic.
+     */
+    const handleCheckIn = async (e) => {
+        e.preventDefault();
+        const scannedBadgeId = badgeIdInput.value.trim().toUpperCase();
+        if (!scannedBadgeId) return;
+
+        driverInfoBox.innerHTML = `<p class="placeholder-text">Searching for Badge ID: ${scannedBadgeId}...</p>`;
+
+        try {
+            // STEP 1: Find the driver in the permanent DA-List by their Badge ID.
+            const permanentDriverDoc = await driversCollectionRef.doc(scannedBadgeId).get();
+
+            if (!permanentDriverDoc.exists) {
+                const errorMsg = `Badge ID ${scannedBadgeId} not found in permanent DA-List.`;
+                createLog(errorMsg, 'error');
+                return showError(errorMsg);
+            }
+            
+            // STEP 2: Get the Transporter ID from that driver's record.
+            const permanentDriverData = permanentDriverDoc.data();
+            const transporterId = permanentDriverData.transporter_id;
+
+            if (!transporterId) {
+                 const errorMsg = `Driver ${permanentDriverData.employee_name} does not have a Transporter ID in the DA-List.`;
+                 createLog(errorMsg, 'error');
+                 return showError(errorMsg);
+            }
+
+            // STEP 3 & 4: Find the Transporter ID in the daily roster and check them in.
+            const dailyDriverData = await db.runTransaction(async (transaction) => {
+                const rosterDoc = await transaction.get(dailyRosterDocRef);
+                if (!rosterDoc.exists) throw new Error("No daily roster has been created yet.");
+
+                let dailyDrivers = rosterDoc.data().drivers || [];
+                const driverIndex = dailyDrivers.findIndex(driver => driver.id === transporterId);
+
+                if (driverIndex === -1) throw new Error(`Driver with Transporter ID ${transporterId} is not on today's roster.`);
+                
+                if (dailyDrivers[driverIndex].status === 'SHOW') throw new Error("ALREADY CHECKED IN");
+
+                dailyDrivers[driverIndex].status = 'SHOW';
+                transaction.update(dailyRosterDocRef, { drivers: dailyDrivers });
+                
+                return dailyDrivers[driverIndex];
+            });
+
+            const successMessage = `Driver ${dailyDriverData.name} (${transporterId}) checked in.`;
+            createLog(successMessage, 'info');
+            showSuccess(dailyDriverData);
+
+        } catch (error) {
+            console.error("Error during check-in: ", error);
+            if (error.message === 'ALREADY CHECKED IN') {
+                showWarning(`Driver with Transporter ID is already checked in.`);
+            } else {
+                 createLog(error.message, 'error');
+                 showError(error.message);
+            }
+        } finally {
+            badgeIdInput.value = '';
+            badgeIdInput.focus();
+        }
+    };
+
+    /**
+     * Displays success message and driver details.
+     */
+    const showSuccess = (rosterData, alreadyCheckedIn) => {
+        const statusMessage = alreadyCheckedIn 
+            ? `<h2 class="status-warn">ALREADY CHECKED IN</h2>` 
+            : `<h2 class="status-ok">CHECK-IN SUCCESSFUL</h2>`;
+
+        driverInfoBox.style.textAlign = 'left';
+        driverInfoBox.innerHTML = `
+            ${statusMessage}
+            <p><strong>DA-Name:</strong> ${rosterData.name}</p>
+            <p><strong>Transporter ID:</strong> ${rosterData.id}</p>
+            <p><strong>Startzeit:</strong> ${rosterData.start_time}</p>
+            <p><strong>Servicetyp:</strong> ${rosterData.service_type}</p>
+            <p><strong>Firmenname:</strong> ${rosterData.company_name}</p>
+        `;
+    };
+
+    const showWarning = (message) => {
+        driverInfoBox.style.textAlign = 'center';
+        driverInfoBox.innerHTML = `<h2 class="status-warn">${message}</h2>`;
+    };
+
+    const showError = (message) => {
+        driverInfoBox.style.textAlign = 'center';
+        driverInfoBox.innerHTML = `<h2 class="status-error">${message}</h2>`;
+    };
+
+    checkInForm.addEventListener('submit', handleCheckIn);
+    badgeIdInput.focus();
+</script>
+</body>
+</html>

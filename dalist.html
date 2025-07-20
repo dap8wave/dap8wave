@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DA List - Amazon DAP8 Wave Check</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <script src="https://www.gstatic.com/firebasejs/9.6.7/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.7/firebase-firestore-compat.js"></script>
+</head>
+<body>
+
+    <header>
+        <div class="header-content">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/a/a9/Amazon_logo.svg" alt="Amazon Logo" class="amazon-logo">
+            <div class="header-title">Amazon DAP8 Wave Check</div>
+            <nav>
+                <a href="index.html">Wave Check</a>
+                <a href="caproster.html">CapRoster</a>
+                <a href="dashboard.html">Dashboard</a>
+                <a href="dalist.html" class="active">DA - List</a>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <div class="page-title">
+            <h2>Driver Associate Master List</h2>
+        </div>
+
+        <div class="form-container">
+            <h3>Add / Update Drivers in Bulk</h3>
+            <p class="instructions">Paste driver list from a spreadsheet. The **Badge Barcode ID (C)** must be unique and will be used as the key.</p>
+            <textarea id="bulk-paste-area" rows="10" placeholder="A: User ID	B: Employee Name	C: Badge Barcode ID	D: Temp Agency Code	E: Transporter ID..."></textarea>
+            <button id="bulk-add-btn" class="action-btn">Add List to Database</button>
+        </div>
+
+        <div class="table-container">
+            <table id="da-list-table">
+                <thead>
+                    <tr>
+                        <th>A: User ID</th>
+                        <th>B: Employee Name</th>
+                        <th>C: Badge Barcode ID</th>
+                        <th>D: Temp Agency Code</th>
+                        <th>E: Transporter ID</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="da-list-body">
+                    </tbody>
+            </table>
+        </div>
+    </main>
+
+    <footer>
+        <p>&copy; Developed and Coded by Karim Elbeih Badawy (DAP8 Night Shift)</p>
+    </footer>
+
+<script>
+    // --- Firebase Configuration ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyAsuz3Zq8IlV-JRDY4t0n2rbj6cTe1ipOY",
+      authDomain: "dap8-wave-check-v2.firebaseapp.com",
+      projectId: "dap8-wave-check-v2",
+      storageBucket: "dap8-wave-check-v2.firebasestorage.app",
+      messagingSenderId: "519755043298",
+      appId: "1:519755043298:web:4082cb0e75bdcc7c8529bb"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    db.settings({ experimentalForceLongPolling: true });
+    
+    const driversCollection = db.collection('drivers');
+
+    // --- DOM Elements ---
+    const bulkAddBtn = document.getElementById('bulk-add-btn');
+    const bulkPasteArea = document.getElementById('bulk-paste-area');
+    const daListBody = document.getElementById('da-list-body');
+
+    /**
+     * Handles the bulk add submission.
+     */
+    const handleBulkAdd = async () => {
+        const rawText = bulkPasteArea.value.trim();
+        if (!rawText) return alert('Please paste a driver list.');
+
+        const rows = rawText.split('\n');
+        const driversToAdd = [];
+
+        for (const row of rows) {
+            const cells = row.split('\t').map(cell => cell.trim());
+            if (cells.length < 3 || !cells[2]) { // Badge ID (column C) is required as the key
+                console.warn("Skipping malformed row:", row);
+                continue;
+            }
+            driversToAdd.push({
+                user_id: cells[0] || '',
+                employee_name: cells[1] || '',
+                badge_id: cells[2].toUpperCase(),
+                agency_code: (cells[3] || '').toUpperCase(),
+                transporter_id: (cells[4] || '').toUpperCase()
+            });
+        }
+
+        if (driversToAdd.length === 0) return alert('No valid drivers found. Ensure Badge ID (Column C) is present.');
+
+        if (!confirm(`You are about to add or update ${driversToAdd.length} drivers. Continue?`)) return;
+
+        // Use a batched write for efficiency
+        const batch = db.batch();
+        driversToAdd.forEach(driver => {
+            const docRef = driversCollection.doc(driver.badge_id); // Use Badge ID as the unique document key
+            const { badge_id, ...driverData } = driver;
+            batch.set(docRef, driverData);
+        });
+
+        try {
+            await batch.commit();
+            alert(`Successfully added/updated ${driversToAdd.length} drivers.`);
+            bulkPasteArea.value = '';
+        } catch (error) {
+            console.error("Error bulk adding drivers: ", error);
+            alert("Could not add drivers. See console for details.");
+        }
+    };
+    
+    /**
+     * Handles the click event to remove a driver.
+     */
+    const handleRemoveDriver = async (e) => {
+        if (e.target.classList.contains('remove-btn')) {
+            const driverId = e.target.dataset.id;
+            if (confirm(`Are you sure you want to permanently remove driver ${driverId}?`)) {
+                try {
+                    await driversCollection.doc(driverId).delete();
+                } catch (error) {
+                    console.error("Error removing driver: ", error);
+                    alert("Could not remove driver.");
+                }
+            }
+        }
+    };
+
+    // Add event listeners
+    bulkAddBtn.addEventListener('click', handleBulkAdd);
+    daListBody.addEventListener('click', handleRemoveDriver);
+
+    // Listen for real-time updates to the drivers collection
+    driversCollection.orderBy('employee_name').onSnapshot(snapshot => {
+        daListBody.innerHTML = '';
+        if (snapshot.empty) {
+            daListBody.innerHTML = '<tr><td colspan="6">No drivers found in the database.</td></tr>';
+            return;
+        }
+        snapshot.forEach(doc => {
+            const driver = doc.data();
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${driver.user_id}</td>
+                <td>${driver.employee_name}</td>
+                <td>${doc.id}</td>
+                <td>${driver.agency_code}</td>
+                <td>${driver.transporter_id}</td>
+                <td><button class="remove-btn" data-id="${doc.id}">Remove</button></td>
+            `;
+            daListBody.appendChild(row);
+        });
+    }, error => {
+        console.error("Error fetching drivers: ", error);
+        daListBody.innerHTML = '<tr><td colspan="6">Error loading driver data.</td></tr>';
+    });
+</script>
+
+</body>
+</html>

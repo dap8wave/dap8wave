@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CapRoster - Amazon DAP8 Wave Check</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <script src="https://www.gstatic.com/firebasejs/9.6.7/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.7/firebase-firestore-compat.js"></script>
+</head>
+<body>
+
+    <header>
+        <div class="header-content">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/a/a9/Amazon_logo.svg" alt="Amazon Logo" class="amazon-logo">
+            <div class="header-title">Amazon DAP8 Wave Check</div>
+            <nav>
+                <a href="index.html">Wave Check</a>
+                <a href="caproster.html" class="active">CapRoster</a>
+                <a href="dashboard.html">Dashboard</a>
+                <a href="dalist.html">DA - List</a>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <div class="page-title">
+            <h2>Capacity Roster</h2>
+        </div>
+
+        <div class="form-container">
+            <label for="data-paste-area">Paste Full Roster Data Here</label>
+            <p class="instructions">Copied data is saved online until you click Reset.</p>
+            <textarea id="data-paste-area" rows="12" placeholder="Example: DA-ID-1	Doe, John	Ja	Standard..."></textarea>
+            <div class="button-group">
+                <button id="process-btn" class="action-btn">Process & Save Roster</button>
+                <button id="reset-btn" class="danger-btn">Reset Roster</button>
+            </div>
+        </div>
+
+        <div class="table-container">
+            <table id="roster-table">
+                <thead>
+                    <tr>
+                        <th>DA-ID</th>
+                        <th>DA-Name</th>
+                        <th>Verfügbarkeit</th>
+                        <th>Servicetyp</th>
+                        <th>Schichtlänge</th>
+                        <th>Startzeit</th>
+                        <th>Endzeitpunkt</th>
+                        <th>Firmenname</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="roster-body">
+                    </tbody>
+            </table>
+        </div>
+    </main>
+    
+    <footer>
+        <p>&copy; Developed and Coded by Karim Elbeih Badawy (DAP8 Night Shift)</p>
+    </footer>
+
+<script>
+    // --- Firebase Configuration ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyAsuz3Zq8IlV-JRDY4t0n2rbj6cTe1ipOY",
+      authDomain: "dap8-wave-check-v2.firebaseapp.com",
+      projectId: "dap8-wave-check-v2",
+      storageBucket: "dap8-wave-check-v2.firebasestorage.app",
+      messagingSenderId: "519755043298",
+      appId: "1:519755043298:web:4082cb0e75bdcc7c8529bb"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    db.settings({ experimentalForceLongPolling: true });
+
+    const dailyRosterDocRef = db.collection('daily_roster').doc('current');
+    const driversCollectionRef = db.collection('drivers');
+
+    // --- DOM Elements ---
+    const processBtn = document.getElementById('process-btn');
+    const resetBtn = document.getElementById('reset-btn');
+    const dataPasteArea = document.getElementById('data-paste-area');
+    const rosterBody = document.getElementById('roster-body');
+
+    /**
+     * Renders the table from the roster data stored in Firebase.
+     */
+    const renderTable = (rosterData) => {
+        rosterBody.innerHTML = '';
+        if (!rosterData || rosterData.length === 0) return;
+        
+        rosterData.sort((a, b) => {
+            if (a.status === 'NO_SHOW' && b.status === 'SHOW') return -1;
+            if (a.status === 'SHOW' && b.status === 'NO_SHOW') return 1;
+            return a.name.localeCompare(b.name);
+        });
+
+        rosterData.forEach(driver => {
+            const row = document.createElement('tr');
+            const status = driver.status || 'NO_SHOW';
+            row.className = status === 'SHOW' ? 'status-show' : 'status-no-show';
+            row.innerHTML = `
+                <td>${driver.id || ''}</td>
+                <td>${driver.name || ''}</td>
+                <td>${driver.availability || ''}</td>
+                <td>${driver.service_type || ''}</td>
+                <td>${driver.shift_length || ''}</td>
+                <td>${driver.start_time || ''}</td>
+                <td>${driver.end_time || ''}</td>
+                <td>${driver.company_name || ''}</td>
+                <td>${status}</td>
+            `;
+            rosterBody.appendChild(row);
+        });
+    };
+    
+    /**
+     * Processes pasted text and saves it to Firestore.
+     */
+    const processAndSaveList = async () => {
+        const rawText = dataPasteArea.value.trim();
+        if (rawText === '') return alert('Please paste roster data.');
+
+        const rows = rawText.split('\n').filter(row => row.trim() !== '');
+        
+        const rosterDataPromises = rows.map(async (rowText) => {
+            const cells = rowText.split('\t');
+            const daId = cells[0] || '';
+            let companyName = cells[7] || '';
+
+            // If company name is missing from paste, try to look it up in the DA-List
+            if (!companyName && daId) {
+                try {
+                    const driverDoc = await driversCollectionRef.where('transporter_id', '==', daId).limit(1).get();
+                    if (!driverDoc.empty) {
+                        companyName = driverDoc.docs[0].data().agency_code || '';
+                    }
+                } catch (e) {
+                    console.error("Could not look up company name for DA-ID:", daId);
+                }
+            }
+
+            return {
+                id: daId,
+                name: cells[1] || '',
+                availability: cells[2] || '',
+                service_type: cells[3] || '',
+                shift_length: cells[4] || '',
+                start_time: cells[5] || '',
+                end_time: cells[6] || '',
+                company_name: companyName,
+                status: 'NO_SHOW'
+            };
+        });
+        
+        const rosterData = await Promise.all(rosterDataPromises);
+
+        try {
+            await dailyRosterDocRef.set({ drivers: rosterData });
+            alert('Roster has been saved to the online database.');
+            dataPasteArea.value = '';
+        } catch (error) {
+            console.error("Error saving roster: ", error);
+            alert("Could not save roster to the database.");
+        }
+    };
+
+    /**
+     * Deletes the daily roster from Firestore.
+     */
+    const resetRoster = async () => {
+        if (confirm('Are you sure you want to reset the roster? This will clear the daily roster for everyone.')) {
+            try {
+                await dailyRosterDocRef.delete();
+                alert('Roster has been reset.');
+            } catch (error) {
+                console.error("Error resetting roster: ", error);
+                alert("Could not reset roster.");
+            }
+        }
+    };
+
+    // --- Real-time Listener ---
+    dailyRosterDocRef.onSnapshot(doc => {
+        if (doc.exists) {
+            renderTable(doc.data().drivers);
+        } else {
+            rosterBody.innerHTML = '<tr><td colspan="9">No roster has been set for today.</td></tr>';
+        }
+    }, error => {
+        console.error("Error fetching live roster: ", error);
+        rosterBody.innerHTML = '<tr><td colspan="9">Connection to database failed.</td></tr>';
+    });
+
+    processBtn.addEventListener('click', processAndSaveList);
+    resetBtn.addEventListener('click', resetRoster);
+</script>
+
+</body>
+</html>

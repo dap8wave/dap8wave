@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Amazon DAP8 Wave Check</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <script src="https://www.gstatic.com/firebasejs/9.6.7/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.7/firebase-firestore-compat.js"></script>
+</head>
+<body>
+
+    <header>
+        <div class="header-content">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/a/a9/Amazon_logo.svg" alt="Amazon Logo" class="amazon-logo">
+            <div class="header-title">Amazon DAP8 Wave Check</div>
+            <nav>
+                <a href="index.html">Wave Check</a>
+                <a href="caproster.html">CapRoster</a>
+                <a href="dashboard.html" class="active">Dashboard</a>
+                <a href="dalist.html">DA - List</a>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <div class="page-title">
+            <h2>Wave Progress Dashboard</h2>
+            <p id="current-time-display" class="time-display"></p>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h4>Total on Roster</h4>
+                <p class="stat-number" id="total-drivers">0</p>
+                <p class="stat-desc">Drivers Scheduled Today</p>
+            </div>
+            <div class="stat-card">
+                <h4>Drivers Checked In</h4>
+                <p class="stat-number" id="checked-in-drivers" style="color: #2ECC71;">0</p>
+                <p class="stat-desc">"SHOW" Status</p>
+            </div>
+            <div class="stat-card">
+                <h4>Remaining</h4>
+                <p class="stat-number" id="remaining-drivers" style="color: #E67E22;">0</p>
+                <p class="stat-desc">"NO SHOW" Status</p>
+            </div>
+            <div class="stat-card">
+                <h4>Exceptions</h4>
+                <p class="stat-number" id="exception-drivers" style="color: #D9534F;">0</p>
+                <p class="stat-desc">Errors or Issues</p>
+            </div>
+        </div>
+
+        <div class="progress-section">
+            <h4 id="progress-text">Check-In Progress (0%)</h4>
+            <div class="progress-container">
+                <div class="progress-bar" id="progress-bar" style="width: 0%;"></div>
+            </div>
+        </div>
+        
+        <div class="activity-log">
+            <h3>Recent Activity</h3>
+            <ul id="log-list">
+                <li>Waiting for activity...</li>
+            </ul>
+        </div>
+    </main>
+    
+    <footer>
+        <p>&copy; Developed and Coded by Karim Elbeih Badawy (DAP8 Night Shift)</p>
+    </footer>
+
+<script>
+    // --- Firebase Configuration ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyAsuz3Zq8IlV-JRDY4t0n2rbj6cTe1ipOY",
+      authDomain: "dap8-wave-check-v2.firebaseapp.com",
+      projectId: "dap8-wave-check-v2",
+      storageBucket: "dap8-wave-check-v2.firebasestorage.app",
+      messagingSenderId: "519755043298",
+      appId: "1:519755043298:web:4082cb0e75bdcc7c8529bb"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    db.settings({ experimentalForceLongPolling: true });
+
+    const dailyRosterDocRef = db.collection('daily_roster').doc('current');
+    
+    // --- DOM Elements ---
+    const totalDriversEl = document.getElementById('total-drivers');
+    const checkedInDriversEl = document.getElementById('checked-in-drivers');
+    const remainingDriversEl = document.getElementById('remaining-drivers');
+    const exceptionDriversEl = document.getElementById('exception-drivers');
+    const progressTextEl = document.getElementById('progress-text');
+    const progressBarEl = document.getElementById('progress-bar');
+    const logListEl = document.getElementById('log-list');
+
+    /**
+     * Updates all dashboard cards and progress bar from roster data.
+     */
+    const updateDashboard = (rosterData = []) => {
+        const total = rosterData.length;
+        const checkedIn = rosterData.filter(driver => driver.status === 'SHOW').length;
+        const remaining = total - checkedIn;
+        
+        totalDriversEl.textContent = total;
+        checkedInDriversEl.textContent = checkedIn;
+        remainingDriversEl.textContent = remaining;
+
+        let percentage = 0;
+        if (total > 0) {
+            percentage = Math.round((checkedIn / total) * 100);
+        }
+        
+        progressTextEl.textContent = `Check-In Progress (${percentage}%)`;
+        progressBarEl.style.width = `${percentage}%`;
+    };
+
+    /**
+     * Updates the live clock.
+     */
+    function updateTime() {
+        const timeDisplay = document.getElementById('current-time-display');
+        if (!timeDisplay) return;
+        const now = new Date();
+        const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' };
+        timeDisplay.textContent = now.toLocaleDateString('de-AT', options);
+    }
+    
+    // --- Real-time Listeners ---
+    dailyRosterDocRef.onSnapshot(doc => {
+        const rosterData = doc.exists ? doc.data().drivers : [];
+        updateDashboard(rosterData);
+    }, error => {
+        console.error("Error fetching live roster: ", error);
+        alert("Could not connect to the database to get live roster updates.");
+    });
+
+    // Listen for new log entries
+    db.collection('logs').orderBy('timestamp', 'desc').limit(5).onSnapshot(querySnapshot => {
+        logListEl.innerHTML = '';
+        if (querySnapshot.empty) {
+            logListEl.innerHTML = '<li>No recent activity.</li>';
+            return;
+        }
+        querySnapshot.forEach(doc => {
+            const log = doc.data();
+            const logTime = log.timestamp.toDate().toLocaleTimeString('de-AT');
+            const newLogEntry = document.createElement('li');
+            
+            let message = `<span class="log-time">${logTime}</span> ${log.message}`;
+            if (log.type === 'error') {
+                 message = `<span class="log-time">${logTime}</span> <span class="log-error">ERROR:</span> ${log.message}`;
+            }
+
+            newLogEntry.innerHTML = message;
+            logListEl.appendChild(newLogEntry);
+        });
+    }, err => {
+        console.log(`Could not fetch logs: ${err}`);
+    });
+
+    // --- Initializers ---
+    setInterval(updateTime, 1000);
+    updateTime();
+
+</script>
+
+</body>
+</html>
