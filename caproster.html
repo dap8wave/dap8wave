@@ -23,6 +23,7 @@
                 <a href="caproster.html" class="active">CapRoster</a>
                 <a href="dashboard.html">Dashboard</a>
                 <a href="dalist.html">DA - List</a>
+                <a href="list-checker.html">List Checker</a>
             </nav>
         </div>
     </header>
@@ -140,9 +141,11 @@
             // If company name is missing from paste, try to look it up in the DA-List
             if (!companyName && daId) {
                 try {
-                    const driverDoc = await driversCollectionRef.where('transporter_id', '==', daId).limit(1).get();
-                    if (!driverDoc.empty) {
-                        companyName = driverDoc.docs[0].data().agency_code || '';
+                    // NOTE: This assumes DA-ID in roster is the Badge ID in the drivers list.
+                    // If Transporter ID is the key, this lookup needs to change.
+                    const driverDoc = await driversCollectionRef.doc(daId).get();
+                    if (driverDoc.exists) {
+                        companyName = driverDoc.data().agency_code || '';
                     }
                 } catch (e) {
                     console.error("Could not look up company name for DA-ID:", daId);
