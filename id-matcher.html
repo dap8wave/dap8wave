@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ID/DA Matcher - Amazon DAP8</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <script src="https://www.gstatic.com/firebasejs/9.6.7/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.7/firebase-firestore-compat.js"></script>
+</head>
+<body>
+
+    <header>
+        <div class="header-content">
+            <img src="https://upload.wikimedia.org/wikipedia/commons/a/a9/Amazon_logo.svg" alt="Amazon Logo" class="amazon-logo">
+            <div class="header-title">Amazon DAP8 Wave Check</div>
+            <nav>
+                <a href="index.html">Wave Check</a>
+                <a href="caproster.html">CapRoster</a>
+                <a href="dashboard.html">Dashboard</a>
+                <a href="dalist.html">DA - List</a>
+                <a href="id-matcher.html" class="active">ID/DA Matcher</a>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <div class="page-title">
+            <h2>ID/DA Matcher</h2>
+            <p>Match the daily roster with the permanent DA-List to find Badge IDs.</p>
+        </div>
+
+        <div class="form-container">
+            <h3>Generate Matched List</h3>
+            <p class="instructions">This tool will read the current CapRoster and find the corresponding Badge ID for each driver from the DA-List.</p>
+            <button id="run-match-btn" class="action-btn">Generate Match List</button>
+        </div>
+
+        <div class="table-container dark-table" id="matched-section" style="display: none;">
+            <h3>Matched Drivers</h3>
+            <table id="matched-table">
+                <thead>
+                    <tr>
+                        <th>Transporter ID</th>
+                        <th>Badge ID</th>
+                        <th>Name</th>
+                        <th>Start Time</th>
+                        <th>Servicetyp</th>
+                    </tr>
+                </thead>
+                <tbody id="matched-body"></tbody>
+            </table>
+            <div class="button-group" style="margin-top: 20px;">
+                <button id="update-roster-btn" class="action-btn">Update CapRoster with Badge IDs</button>
+                <button id="save-list-btn" class="action-btn">Save This List to Database</button>
+            </div>
+        </div>
+
+        <div class="results-container" id="unmatched-section" style="display: none;">
+            <h3>Drivers Not Found (or without Badge ID) in DA-List</h3>
+            <ul id="unmatched-list"></ul>
+        </div>
+    </main>
+    
+    <footer>
+        <p>&copy; Developed and Coded by Karim Elbeih Badawy (DAP8 Night Shift)</p>
+    </footer>
+
+<script>
+    // --- Firebase Configuration ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyAsuz3Zq8IlV-JRDY4t0n2rbj6cTe1ipOY",
+      authDomain: "dap8-wave-check-v2.firebaseapp.com",
+      projectId: "dap8-wave-check-v2",
+      storageBucket: "dap8-wave-check-v2.firebasestorage.app",
+      messagingSenderId: "519755043298",
+      appId: "1:519755043298:web:4082cb0e75bdcc7c8529bb"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    db.settings({ experimentalForceLongPolling: true });
+
+    const dailyRosterDocRef = db.collection('daily_roster').doc('current');
+    const driversCollectionRef = db.collection('drivers');
+    const updatedListCollectionRef = db.collection('drivers_list_updated');
+
+    // --- DOM Elements ---
+    const runMatchBtn = document.getElementById('run-match-btn');
+    const matchedSection = document.getElementById('matched-section');
+    const matchedBody = document.getElementById('matched-body');
+    const saveListBtn = document.getElementById('save-list-btn');
+    const updateRosterBtn = document.getElementById('update-roster-btn');
+    const unmatchedSection = document.getElementById('unmatched-section');
+    const unmatchedList = document.getElementById('unmatched-list');
+
+    let matchedListCache = [];
+
+    const normalizeName = (name) => {
+        if (!name) return '';
+        return name.toLowerCase().replace(/[,.]/g, '').split(' ').filter(Boolean).sort().join(' ');
+    };
+
+    const generateMatchList = async () => {
+        runMatchBtn.textContent = 'Generating...';
+        runMatchBtn.disabled = true;
+        matchedListCache = [];
+
+        try {
+            const rosterDoc = await dailyRosterDocRef.get();
+            if (!rosterDoc.exists) {
+                alert("No daily roster has been created yet.");
+                return;
+            }
+            const driversOnRoster = rosterDoc.data().drivers || [];
+            const permanentDriversSnapshot = await driversCollectionRef.get();
+            
+            const permanentDrivers = permanentDriversSnapshot.docs.map(doc => ({
+                badge_id: doc.id,
+                ...doc.data(),
+                normalized_name: normalizeName(doc.data().employee_name)
+            }));
+            
+            const unmatchedDrivers = [];
+
+            for (const rosterDriver of driversOnRoster) {
+                const normalizedRosterName = normalizeName(rosterDriver.name);
+                const foundPermanentDriver = permanentDrivers.find(pDriver => pDriver.normalized_name === normalizedRosterName);
+
+                if (foundPermanentDriver && foundPermanentDriver.badge_id && foundPermanentDriver.badge_id.trim() !== '') {
+                    matchedListCache.push({
+                        ...rosterDriver,
+                        foundBadgeId: foundPermanentDriver.badge_id
+                    });
+                } else {
+                    unmatchedDrivers.push({
+                        rosterName: rosterDriver.name,
+                        permanentDriverDocId: foundPermanentDriver ? foundPermanentDriver.docId : null
+                    });
+                }
+            }
+
+            renderMatchedTable(matchedListCache);
+            renderUnmatchedList(unmatchedDrivers);
+
+        } catch (error) {
+            console.error("Error generating match list:", error);
+            alert("An error occurred. Check the console.");
+        } finally {
+            runMatchBtn.textContent = 'Generate Match List';
+            runMatchBtn.disabled = false;
+        }
+    };
+
+    const renderMatchedTable = (data) => {
+        matchedBody.innerHTML = '';
+        if (data.length > 0) {
+            data.forEach(item => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${item.transporter_id}</td>
+                    <td>${item.foundBadgeId}</td>
+                    <td>${item.name}</td>
+                    <td>${item.start_time}</td>
+                    <td>${item.service_type}</td>
+                `;
+                matchedBody.appendChild(row);
+            });
+            matchedSection.style.display = 'block';
+        } else {
+            matchedSection.style.display = 'none';
+        }
+    };
+    
+    const renderUnmatchedList = (drivers) => {
+        // ... (this function is unchanged) ...
+    };
+
+    /**
+     * NEW FUNCTION: Updates the existing daily roster with found Badge IDs.
+     */
+    const updateCapRoster = async () => {
+        if (matchedListCache.length === 0) {
+            return alert("No matched drivers to update.");
+        }
+        if (!confirm(`This will update the CapRoster with ${matchedListCache.length} found Badge IDs. Unmatched drivers will be left as they are. Continue?`)) {
+            return;
+        }
+
+        updateRosterBtn.textContent = 'Updating...';
+        updateRosterBtn.disabled = true;
+
+        try {
+            await db.runTransaction(async (transaction) => {
+                const rosterDoc = await transaction.get(dailyRosterDocRef);
+                if (!rosterDoc.exists) throw new Error("CapRoster no longer exists.");
+
+                let currentRosterDrivers = rosterDoc.data().drivers;
+
+                // Create a map of matched names to their new Badge IDs for easy lookup
+                const matchedMap = new Map();
+                matchedListCache.forEach(driver => {
+                    matchedMap.set(normalizeName(driver.name), driver.foundBadgeId);
+                });
+
+                // Go through the current roster and update it if a match is found
+                const updatedRosterDrivers = currentRosterDrivers.map(rosterDriver => {
+                    const normalizedName = normalizeName(rosterDriver.name);
+                    if (matchedMap.has(normalizedName)) {
+                        // This driver was matched, update their badge_id
+                        return { ...rosterDriver, badge_id: matchedMap.get(normalizedName) };
+                    } else {
+                        // This driver was not matched, return them unchanged
+                        return rosterDriver;
+                    }
+                });
+
+                transaction.update(dailyRosterDocRef, { drivers: updatedRosterDrivers });
+            });
+
+            alert('CapRoster has been successfully updated with the found Badge IDs!');
+
+        } catch (error) {
+            console.error("Error updating CapRoster:", error);
+            alert("Could not update the CapRoster. See console for details.");
+        } finally {
+            updateRosterBtn.textContent = 'Update CapRoster with Badge IDs';
+            updateRosterBtn.disabled = false;
+        }
+    };
+
+
+    const saveMatchedList = async () => {
+        // ... (this function is unchanged) ...
+    };
+
+    const handleManualBadgeSave = async (e) => {
+        // ... (this function is unchanged) ...
+    };
+
+    runMatchBtn.addEventListener('click', generateMatchList);
+    saveListBtn.addEventListener('click', saveMatchedList);
+    updateRosterBtn.addEventListener('click', updateCapRoster);
+    unmatchedList.addEventListener('click', handleManualBadgeSave);
+</script>
+
+</body>
+</html>

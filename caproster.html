@@ -23,7 +23,7 @@
                 <a href="caproster.html" class="active">CapRoster</a>
                 <a href="dashboard.html">Dashboard</a>
                 <a href="dalist.html">DA - List</a>
-                <a href="list-checker.html">List Checker</a>
+                <a href="id-matcher.html">ID/DA Matcher</a>
             </nav>
         </div>
     </header>
@@ -35,8 +35,8 @@
 
         <div class="form-container">
             <label for="data-paste-area">Paste Full Roster Data Here</label>
-            <p class="instructions">Copied data is saved online until you click Reset.</p>
-            <textarea id="data-paste-area" rows="12" placeholder="Example: DA-ID-1	Doe, John	Ja	Standard..."></textarea>
+            <p class="instructions">The system will automatically detect and extract the required columns.</p>
+            <textarea id="data-paste-area" rows="12" placeholder="Paste your full list from a spreadsheet here..."></textarea>
             <div class="button-group">
                 <button id="process-btn" class="action-btn">Process & Save Roster</button>
                 <button id="reset-btn" class="danger-btn">Reset Roster</button>
@@ -44,17 +44,15 @@
         </div>
 
         <div class="table-container">
+            <h3>Current Roster</h3>
             <table id="roster-table">
                 <thead>
                     <tr>
-                        <th>DA-ID</th>
-                        <th>DA-Name</th>
-                        <th>Verfügbarkeit</th>
+                        <th>Transporter ID</th>
+                        <th>Badge ID</th>
+                        <th>Name</th>
+                        <th>Start Time</th>
                         <th>Servicetyp</th>
-                        <th>Schichtlänge</th>
-                        <th>Startzeit</th>
-                        <th>Endzeitpunkt</th>
-                        <th>Firmenname</th>
                         <th>Status</th>
                     </tr>
                 </thead>
@@ -84,7 +82,6 @@
     db.settings({ experimentalForceLongPolling: true });
 
     const dailyRosterDocRef = db.collection('daily_roster').doc('current');
-    const driversCollectionRef = db.collection('drivers');
 
     // --- DOM Elements ---
     const processBtn = document.getElementById('process-btn');
@@ -93,7 +90,7 @@
     const rosterBody = document.getElementById('roster-body');
 
     /**
-     * Renders the table from the roster data stored in Firebase.
+     * Renders the table with the new 5-column format.
      */
     const renderTable = (rosterData) => {
         rosterBody.innerHTML = '';
@@ -110,14 +107,11 @@
             const status = driver.status || 'NO_SHOW';
             row.className = status === 'SHOW' ? 'status-show' : 'status-no-show';
             row.innerHTML = `
-                <td>${driver.id || ''}</td>
+                <td>${driver.transporter_id || ''}</td>
+                <td>${driver.badge_id || ''}</td>
                 <td>${driver.name || ''}</td>
-                <td>${driver.availability || ''}</td>
-                <td>${driver.service_type || ''}</td>
-                <td>${driver.shift_length || ''}</td>
                 <td>${driver.start_time || ''}</td>
-                <td>${driver.end_time || ''}</td>
-                <td>${driver.company_name || ''}</td>
+                <td>${driver.service_type || ''}</td>
                 <td>${status}</td>
             `;
             rosterBody.appendChild(row);
@@ -125,7 +119,7 @@
     };
     
     /**
-     * Processes pasted text and saves it to Firestore.
+     * Processes pasted text, auto-detects columns, and saves to Firestore.
      */
     const processAndSaveList = async () => {
         const rawText = dataPasteArea.value.trim();
@@ -133,43 +127,22 @@
 
         const rows = rawText.split('\n').filter(row => row.trim() !== '');
         
-        const rosterDataPromises = rows.map(async (rowText) => {
+        const rosterData = rows.map(rowText => {
             const cells = rowText.split('\t');
-            const daId = cells[0] || '';
-            let companyName = cells[7] || '';
-
-            // If company name is missing from paste, try to look it up in the DA-List
-            if (!companyName && daId) {
-                try {
-                    // NOTE: This assumes DA-ID in roster is the Badge ID in the drivers list.
-                    // If Transporter ID is the key, this lookup needs to change.
-                    const driverDoc = await driversCollectionRef.doc(daId).get();
-                    if (driverDoc.exists) {
-                        companyName = driverDoc.data().agency_code || '';
-                    }
-                } catch (e) {
-                    console.error("Could not look up company name for DA-ID:", daId);
-                }
-            }
-
+            // Auto-detect and extract specific columns, ignoring the rest
             return {
-                id: daId,
+                transporter_id: cells[0] || '',
+                badge_id: '', // Keep blank as requested
                 name: cells[1] || '',
-                availability: cells[2] || '',
-                service_type: cells[3] || '',
-                shift_length: cells[4] || '',
                 start_time: cells[5] || '',
-                end_time: cells[6] || '',
-                company_name: companyName,
+                service_type: cells[3] || '',
                 status: 'NO_SHOW'
             };
         });
-        
-        const rosterData = await Promise.all(rosterDataPromises);
 
         try {
             await dailyRosterDocRef.set({ drivers: rosterData });
-            alert('Roster has been saved to the online database.');
+            alert('Roster has been processed and saved to the online database.');
             dataPasteArea.value = '';
         } catch (error) {
             console.error("Error saving roster: ", error);
@@ -197,15 +170,17 @@
         if (doc.exists) {
             renderTable(doc.data().drivers);
         } else {
-            rosterBody.innerHTML = '<tr><td colspan="9">No roster has been set for today.</td></tr>';
+            rosterBody.innerHTML = '<tr><td colspan="6">No roster has been set for today. Paste a list above to start.</td></tr>';
         }
     }, error => {
         console.error("Error fetching live roster: ", error);
-        rosterBody.innerHTML = '<tr><td colspan="9">Connection to database failed.</td></tr>';
+        rosterBody.innerHTML = '<tr><td colspan="6">Connection to database failed.</td></tr>';
     });
-
+    
+    // --- Event Listeners ---
     processBtn.addEventListener('click', processAndSaveList);
     resetBtn.addEventListener('click', resetRoster);
+
 </script>
 
 </body>

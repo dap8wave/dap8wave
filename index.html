@@ -23,7 +23,7 @@
                 <a href="caproster.html">CapRoster</a>
                 <a href="dashboard.html">Dashboard</a>
                 <a href="dalist.html">DA - List</a>
-                <a href="list-checker.html">List Checker</a>
+                <a href="id-matcher.html">ID/DA Matcher</a>
             </nav>
         </div>
     </header>
@@ -47,16 +47,13 @@
         </div>
     </main>
     
-    <div id="popup-modal" class="modal-overlay" style="display: none;">
+    <div id="manual-select-modal" class="modal-overlay" style="display: none;">
         <div class="modal-content">
-            <h3>Assign Unrecognized Badge ID</h3>
-            <p>The Badge ID <strong id="unassigned-badge-id"></strong> was not found in the DA-List.</p>
-            <p>To assign it to a driver, search for their name below.</p>
-            <div class="inline-form">
-                <input type="text" id="name-search-input" placeholder="Type first or last name...">
-                <button id="search-name-btn" class="action-btn">Search</button>
-            </div>
-            <div id="name-search-results"></div>
+            <h3>Badge ID Not Found in Roster</h3>
+            <p>Please select a driver manually.</p>
+            <input type="text" id="manual-search-input" class="modal-search" placeholder="Search by name or ID...">
+            <div id="manual-select-list" class="manual-list-container">
+                </div>
             <button id="close-modal-btn" class="danger-btn">Cancel</button>
         </div>
     </div>
@@ -81,168 +78,143 @@
     db.settings({ experimentalForceLongPolling: true });
 
     const dailyRosterDocRef = db.collection('daily_roster').doc('current');
-    const driversCollectionRef = db.collection('drivers');
-    const logsCollectionRef = db.collection('logs');
 
     // --- DOM Elements ---
     const checkInForm = document.getElementById('check-in-form');
     const badgeIdInput = document.getElementById('badge-id-input');
     const driverInfoBox = document.getElementById('driver-info-box');
-    const popupModal = document.getElementById('popup-modal');
-    const unassignedBadgeIdEl = document.getElementById('unassigned-badge-id');
-    const nameSearchInput = document.getElementById('name-search-input');
-    const searchNameBtn = document.getElementById('search-name-btn');
-    const nameSearchResults = document.getElementById('name-search-results');
+    const manualSelectModal = document.getElementById('manual-select-modal');
+    const manualSelectList = document.getElementById('manual-select-list');
     const closeModalBtn = document.getElementById('close-modal-btn');
+    const manualSearchInput = document.getElementById('manual-search-input');
+    
+    let rosterCache = []; // Cache for the daily roster to use in the popup
 
-    let scannedBadgeIdToAssign = null; // Store the scanned ID temporarily
-
-    // --- Popup Logic ---
-    const openAssignPopup = (badgeId) => {
-        scannedBadgeIdToAssign = badgeId;
-        unassignedBadgeIdEl.textContent = badgeId;
-        nameSearchResults.innerHTML = '';
-        nameSearchInput.value = '';
-        popupModal.style.display = 'flex';
-    };
-
-    const closeAssignPopup = () => {
-        popupModal.style.display = 'none';
-        scannedBadgeIdToAssign = null;
-    };
-
-    const searchByName = async () => {
-        const nameQuery = nameSearchInput.value.trim();
-        if (nameQuery.length < 3) {
-            alert("Please enter at least 3 characters to search.");
-            return;
+    // Pre-fetch the roster on page load
+    dailyRosterDocRef.onSnapshot(doc => {
+        if (doc.exists) {
+            rosterCache = doc.data().drivers || [];
+        } else {
+            rosterCache = [];
         }
-        
-        nameSearchResults.innerHTML = '<p>Searching...</p>';
-        
-        // This query finds names that are greater than or equal to the query
-        const querySnapshot = await driversCollectionRef.where('employee_name', '>=', nameQuery).where('employee_name', '<=', nameQuery + '\uf8ff').get();
-
-        if (querySnapshot.empty) {
-            nameSearchResults.innerHTML = '<p>No drivers found with that name.</p>';
-            return;
-        }
-
-        nameSearchResults.innerHTML = '<ul>' + querySnapshot.docs.map(doc => {
-            const driver = doc.data();
-            return `<li>
-                        <span>${driver.employee_name} (${driver.transporter_id})</span>
-                        <button class="assign-btn" data-doc-id="${doc.id}">Assign Badge</button>
-                    </li>`;
-        }).join('') + '</ul>';
-    };
-
-    const assignBadgeToDriver = async (e) => {
-        if (!e.target.classList.contains('assign-btn')) return;
-
-        const docId = e.target.dataset.docId;
-        if (confirm(`Are you sure you want to assign Badge ID ${scannedBadgeIdToAssign} to this driver?`)) {
-            try {
-                await driversCollectionRef.doc(docId).update({
-                    badge_id: scannedBadgeIdToAssign
-                });
-                alert('Badge ID successfully assigned!');
-                closeAssignPopup();
-                // Automatically re-run the check-in process
-                badgeIdInput.value = scannedBadgeIdToAssign;
-                handleCheckIn(new Event('submit'));
-            } catch (error) {
-                console.error("Error assigning badge:", error);
-                alert("Could not assign badge.");
-            }
-        }
-    };
-
-
-    // --- Core Check-In Logic ---
-    const createLog = (message, type = 'info') => {
-        logsCollectionRef.add({ message, type, timestamp: firebase.firestore.FieldValue.serverTimestamp() });
-    };
-
-    const handleCheckIn = async (e) => {
-        e.preventDefault();
-        const scannedBadgeId = badgeIdInput.value.trim().toUpperCase();
-        if (!scannedBadgeId) return;
-
-        driverInfoBox.innerHTML = `<p class="placeholder-text">Searching for Badge ID: ${scannedBadgeId}...</p>`;
-
+    });
+    
+    /**
+     * Reusable function to check in a driver by their Badge ID.
+     */
+    const checkInDriverByBadgeId = async (badgeId) => {
         try {
-            // Step 1: Query the DA-List for the Badge ID.
-            const permanentDriverQuery = await driversCollectionRef.where('badge_id', '==', scannedBadgeId).limit(1).get();
-
-            if (permanentDriverQuery.empty) {
-                // If not found, open the assignment popup
-                openAssignPopup(scannedBadgeId);
-                return;
-            }
-            
-            const permanentDriverDoc = permanentDriverQuery.docs[0];
-            const permanentDriverData = permanentDriverDoc.data();
-            const transporterId = permanentDriverData.transporter_id;
-
-            if (!transporterId) {
-                 const errorMsg = `Driver ${permanentDriverData.employee_name} does not have a Transporter ID in the DA-List.`;
-                 createLog(errorMsg, 'error');
-                 return showError(errorMsg);
-            }
-
-            const dailyDriverData = await db.runTransaction(async (transaction) => {
+            const checkedInDriver = await db.runTransaction(async (transaction) => {
                 const rosterDoc = await transaction.get(dailyRosterDocRef);
                 if (!rosterDoc.exists) throw new Error("No daily roster created.");
 
                 let dailyDrivers = rosterDoc.data().drivers || [];
-                const driverIndex = dailyDrivers.findIndex(driver => driver.id === transporterId);
+                const driverIndex = dailyDrivers.findIndex(driver => driver.badge_id === badgeId);
 
-                if (driverIndex === -1) throw new Error(`Driver with Transporter ID ${transporterId} is not on today's roster.`);
-                if (dailyDrivers[driverIndex].status === 'SHOW') throw new Error("ALREADY CHECKED IN");
+                if (driverIndex === -1) throw new Error(`Driver with Badge ID ${badgeId} is not on today's roster.`);
+                
+                const driverData = dailyDrivers[driverIndex];
+                if (driverData.status === 'SHOW') {
+                    return { ...driverData, alreadyCheckedIn: true };
+                }
 
                 dailyDrivers[driverIndex].status = 'SHOW';
                 transaction.update(dailyRosterDocRef, { drivers: dailyDrivers });
                 return dailyDrivers[driverIndex];
             });
 
-            const successMessage = `Driver ${dailyDriverData.name} (${transporterId}) checked in.`;
-            createLog(successMessage, 'info');
-            showSuccess(dailyDriverData, permanentDriverData);
+            showSuccess(checkedInDriver, checkedInDriver.alreadyCheckedIn);
 
         } catch (error) {
             console.error("Error during check-in: ", error);
-            const errorMessage = error.message;
+            showError(error.message);
+        }
+    };
 
-            if (errorMessage === 'ALREADY CHECKED IN') {
-                showWarning(`Driver is already checked in.`);
-            } else {
-                 createLog(errorMessage, 'error');
-                 showError(errorMessage);
-            }
-        } finally {
-            if (popupModal.style.display === 'none') {
-                badgeIdInput.value = '';
-                badgeIdInput.focus();
-            }
+    /**
+     * Handles the initial form submission.
+     */
+    const handleFormSubmit = async (e) => {
+        e.preventDefault();
+        const scannedBadgeId = badgeIdInput.value.trim().toUpperCase();
+        if (!scannedBadgeId) return;
+
+        driverInfoBox.innerHTML = `<p class="placeholder-text">Searching CapRoster for Badge ID: ${scannedBadgeId}...</p>`;
+
+        const driver = rosterCache.find(d => d.badge_id === scannedBadgeId);
+
+        if (driver) {
+            // ID was found directly, proceed to check-in
+            await checkInDriverByBadgeId(scannedBadgeId);
+        } else {
+            // ID was not found, open manual selection popup
+            openManualSelectionPopup();
+        }
+
+        badgeIdInput.value = '';
+        badgeIdInput.focus();
+    };
+
+    const openManualSelectionPopup = () => {
+        manualSearchInput.value = '';
+        renderManualList(rosterCache);
+        manualSelectModal.style.display = 'flex';
+    };
+    
+    const renderManualList = (drivers, filter = '') => {
+        manualSelectList.innerHTML = '';
+        const lowerCaseFilter = filter.toLowerCase();
+
+        const unassignedDrivers = drivers
+            .filter(d => d.status === 'NO_SHOW')
+            .filter(d => 
+                d.name.toLowerCase().includes(lowerCaseFilter) || 
+                d.transporter_id.toLowerCase().includes(lowerCaseFilter)
+            );
+
+        if (unassignedDrivers.length === 0) {
+            manualSelectList.innerHTML = '<p>No matching drivers found.</p>';
+            return;
+        }
+
+        const list = document.createElement('ul');
+        unassignedDrivers.forEach(driver => {
+            const listItem = document.createElement('li');
+            listItem.innerHTML = `
+                <span>${driver.name} (${driver.transporter_id})</span>
+                <button class="select-btn" data-badge-id="${driver.badge_id}">Select</button>
+            `;
+            list.appendChild(listItem);
+        });
+        manualSelectList.appendChild(list);
+    };
+
+    const handleManualSelect = async (e) => {
+        if (e.target.classList.contains('select-btn')) {
+            const badgeId = e.target.dataset.badgeId;
+            closeManualSelectionPopup();
+            await checkInDriverByBadgeId(badgeId);
         }
     };
     
-    const showSuccess = (rosterData, permanentData) => {
-        driverInfoBox.style.textAlign = 'left';
-        driverInfoBox.innerHTML = `
-            <h2 class="status-ok">CHECK-IN SUCCESSFUL</h2>
-            <p><strong>DA-Name:</strong> ${rosterData.name}</p>
-            <p><strong>Transporter ID:</strong> ${rosterData.id}</p>
-            <p><strong>Startzeit:</strong> ${rosterData.start_time}</p>
-            <p><strong>Servicetyp:</strong> ${rosterData.service_type}</p>
-            <p><strong>Firmenname:</strong> ${rosterData.company_name}</p>
-        `;
+    const closeManualSelectionPopup = () => {
+        manualSelectModal.style.display = 'none';
     };
 
-    const showWarning = (message) => {
-        driverInfoBox.style.textAlign = 'center';
-        driverInfoBox.innerHTML = `<h2 class="status-warn">${message}</h2>`;
+    const showSuccess = (rosterData, alreadyCheckedIn) => {
+        const statusMessage = alreadyCheckedIn 
+            ? `<h2 class="status-warn">ALREADY CHECKED IN</h2>` 
+            : `<h2 class="status-ok">CHECK-IN SUCCESSFUL</h2>`;
+
+        driverInfoBox.style.textAlign = 'left';
+        driverInfoBox.innerHTML = `
+            ${statusMessage}
+            <p><strong>Name:</strong> ${rosterData.name}</p>
+            <p><strong>Transporter ID:</strong> ${rosterData.transporter_id}</p>
+            <p><strong>Badge ID:</strong> ${rosterData.badge_id}</p>
+            <p><strong>Start Time:</strong> ${rosterData.start_time}</p>
+            <p><strong>Servicetyp:</strong> ${rosterData.service_type}</p>
+        `;
     };
 
     const showError = (message) => {
@@ -250,10 +222,11 @@
         driverInfoBox.innerHTML = `<h2 class="status-error">${message}</h2>`;
     };
 
-    checkInForm.addEventListener('submit', handleCheckIn);
-    searchNameBtn.addEventListener('click', searchByName);
-    closeModalBtn.addEventListener('click', closeAssignPopup);
-    nameSearchResults.addEventListener('click', assignBadgeToDriver);
+    // --- Event Listeners ---
+    checkInForm.addEventListener('submit', handleFormSubmit);
+    closeModalBtn.addEventListener('click', closeManualSelectionPopup);
+    manualSelectList.addEventListener('click', handleManualSelect);
+    manualSearchInput.addEventListener('input', (e) => renderManualList(rosterCache, e.target.value));
     
     badgeIdInput.focus();
 </script>

@@ -212,21 +212,22 @@ main {
     box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
 }
 
-#roster-table, #da-list-table {
+#roster-table, #da-list-table, #matched-table {
     width: 100%;
     border-collapse: collapse;
     color: var(--text-dark);
 }
 
 #roster-table th, #roster-table td,
-#da-list-table th, #da-list-table td {
+#da-list-table th, #da-list-table td,
+#matched-table th, #matched-table td {
     padding: 12px 15px;
     text-align: left;
     border-bottom: 1px solid #ddd;
     white-space: nowrap;
 }
 
-#roster-table thead tr, #da-list-table thead tr {
+#roster-table thead tr, #da-list-table thead tr, #matched-table thead tr {
     background-color: var(--secondary-blue);
     color: var(--text-light);
     font-size: 1rem;
@@ -409,9 +410,9 @@ main {
 .driver-info-box .status-warn { color: var(--warning-orange); }
 .driver-info-box .status-error { color: var(--danger-red); }
 
-/* --- List Checker & Badge Finder --- */
+/* --- List Checker & ID Matcher Dark Theme --- */
 .results-container {
-    background-color: rgba(0, 0, 0, 0.2);
+    background-color: rgba(0, 0, 0, 0.25);
     padding: 25px;
     border-radius: 12px;
     margin-top: 20px;
@@ -420,6 +421,42 @@ main {
 
 .results-container ul {
     padding-left: 20px;
+    margin: 0;
+}
+
+.table-container.dark-table {
+    background-color: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255,255,255,0.1);
+}
+
+.dark-table table {
+    color: var(--text-light);
+}
+
+.dark-table td {
+    border-bottom: 1px solid rgba(255,255,255,0.2) !important;
+}
+
+.dark-table tbody tr:nth-of-type(even) {
+    background-color: rgba(0,0,0,0.2);
+}
+
+.dark-table tbody tr:hover {
+    background-color: var(--secondary-blue);
+}
+
+#unmatched-list {
+    list-style: none;
+    padding: 15px;
+    margin: 0;
+    background-color: rgba(255, 0, 0, 0.1);
+    border-radius: 8px;
+    border: 1px solid var(--danger-red);
+    color: var(--text-light);
+}
+
+#unmatched-list li {
+    padding: 4px 0;
 }
 
 /* --- Popup Modal Styles --- */
@@ -429,7 +466,7 @@ main {
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(0, 0, 0, 0.7);
+    background-color: rgba(0, 0, 0, 0.75);
     display: flex;
     justify-content: center;
     align-items: center;
@@ -442,7 +479,7 @@ main {
     border-radius: 12px;
     border: 1px solid var(--amazon-orange);
     width: 100%;
-    max-width: 500px;
+    max-width: 600px;
     box-shadow: 0 10px 30px rgba(0,0,0,0.5);
     color: var(--text-light);
 }
@@ -451,39 +488,46 @@ main {
     margin-top: 0;
 }
 
-.modal-content .inline-form {
-    margin: 20px 0;
+.modal-search {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 12px;
+    font-size: 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    margin-bottom: 15px;
 }
 
-#name-search-results {
+.manual-list-container {
     margin-top: 20px;
     margin-bottom: 20px;
     background-color: rgba(0,0,0,0.2);
     border-radius: 8px;
     padding: 10px;
     min-height: 50px;
-    max-height: 150px;
+    max-height: 300px;
     overflow-y: auto;
 }
-#name-search-results ul {
+.manual-list-container ul {
     list-style: none;
     padding: 0;
     margin: 0;
 }
-#name-search-results li {
+.manual-list-container li {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 8px;
+    padding: 12px;
     border-bottom: 1px solid rgba(255,255,255,0.1);
 }
-#name-search-results li:last-child {
+.manual-list-container li:last-child {
     border-bottom: none;
 }
-.assign-btn {
+
+.assign-btn, .select-btn {
     background-color: var(--success-green);
     color: white;
-    padding: 5px 10px;
+    padding: 8px 12px;
     border-radius: 6px;
     border: none;
     cursor: pointer;
