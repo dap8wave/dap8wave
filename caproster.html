@@ -32,11 +32,21 @@
         <div class="page-title">
             <h2>Capacity Roster</h2>
         </div>
+        
+        <div class="form-container">
+            <h3>Add Single Driver</h3>
+            <form id="add-single-driver-form" class="single-driver-form">
+                <input type="text" id="single-transporter-id" placeholder="Transporter ID" required>
+                <input type="text" id="single-name" placeholder="Name" required>
+                <input type="text" id="single-start-time" placeholder="Start Time (e.g., 10:25)" required>
+                <input type="text" id="single-service-type" placeholder="Servicetyp" required>
+                <button type="submit" class="action-btn">Add Driver</button>
+            </form>
+        </div>
 
         <div class="form-container">
-            <label for="data-paste-area">Paste Full Roster Data Here</label>
-            <p class="instructions">The system will automatically detect and extract the required columns.</p>
-            <textarea id="data-paste-area" rows="12" placeholder="Paste your full list from a spreadsheet here..."></textarea>
+            <h3>Create / Overwrite Roster in Bulk</h3>
+            <textarea id="data-paste-area" rows="10" placeholder="Paste your full list from a spreadsheet here..."></textarea>
             <div class="button-group">
                 <button id="process-btn" class="action-btn">Process & Save Roster</button>
                 <button id="reset-btn" class="danger-btn">Reset Roster</button>
@@ -54,6 +64,7 @@
                         <th>Start Time</th>
                         <th>Servicetyp</th>
                         <th>Status</th>
+                        <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="roster-body">
@@ -82,30 +93,42 @@
     db.settings({ experimentalForceLongPolling: true });
 
     const dailyRosterDocRef = db.collection('daily_roster').doc('current');
-
+    
     // --- DOM Elements ---
     const processBtn = document.getElementById('process-btn');
     const resetBtn = document.getElementById('reset-btn');
     const dataPasteArea = document.getElementById('data-paste-area');
     const rosterBody = document.getElementById('roster-body');
+    const addSingleDriverForm = document.getElementById('add-single-driver-form');
 
-    /**
-     * Renders the table with the new 5-column format.
-     */
     const renderTable = (rosterData) => {
         rosterBody.innerHTML = '';
         if (!rosterData || rosterData.length === 0) return;
         
         rosterData.sort((a, b) => {
-            if (a.status === 'NO_SHOW' && b.status === 'SHOW') return -1;
-            if (a.status === 'SHOW' && b.status === 'NO_SHOW') return 1;
+            if (a.status === 'NO_SHOW' && b.status !== 'NO_SHOW') return -1;
+            if (a.status !== 'NO_SHOW' && b.status === 'NO_SHOW') return 1;
             return a.name.localeCompare(b.name);
         });
 
         rosterData.forEach(driver => {
             const row = document.createElement('tr');
             const status = driver.status || 'NO_SHOW';
-            row.className = status === 'SHOW' ? 'status-show' : 'status-no-show';
+            
+            if (status === 'SHOW') row.className = 'status-show';
+            else if (status === 'RESCUE') row.className = 'status-rescue';
+            else row.className = 'status-no-show';
+            
+            let actionButtons = `
+                <button class="edit-badge-btn" data-id="${driver.transporter_id}">Edit Badge</button>
+                <button class="rescue-btn" data-id="${driver.transporter_id}">Rescue</button>
+            `;
+            if (status === 'NO_SHOW') {
+                actionButtons += `<button class="check-in-btn" data-id="${driver.transporter_id}">Check In</button>`;
+            } else {
+                actionButtons += `<span class="status-ok-icon">✔</span>`;
+            }
+            
             row.innerHTML = `
                 <td>${driver.transporter_id || ''}</td>
                 <td>${driver.badge_id || ''}</td>
@@ -113,14 +136,15 @@
                 <td>${driver.start_time || ''}</td>
                 <td>${driver.service_type || ''}</td>
                 <td>${status}</td>
+                <td class="action-cell">
+                    ${actionButtons}
+                    <button class="remove-btn" data-id="${driver.transporter_id}">Delete</button>
+                </td>
             `;
             rosterBody.appendChild(row);
         });
     };
     
-    /**
-     * Processes pasted text, auto-detects columns, and saves to Firestore.
-     */
     const processAndSaveList = async () => {
         const rawText = dataPasteArea.value.trim();
         if (rawText === '') return alert('Please paste roster data.');
@@ -129,10 +153,9 @@
         
         const rosterData = rows.map(rowText => {
             const cells = rowText.split('\t');
-            // Auto-detect and extract specific columns, ignoring the rest
             return {
                 transporter_id: cells[0] || '',
-                badge_id: '', // Keep blank as requested
+                badge_id: '',
                 name: cells[1] || '',
                 start_time: cells[5] || '',
                 service_type: cells[3] || '',
@@ -150,9 +173,6 @@
         }
     };
 
-    /**
-     * Deletes the daily roster from Firestore.
-     */
     const resetRoster = async () => {
         if (confirm('Are you sure you want to reset the roster? This will clear the daily roster for everyone.')) {
             try {
@@ -165,22 +185,126 @@
         }
     };
 
-    // --- Real-time Listener ---
+    const addSingleDriver = async (e) => {
+        e.preventDefault();
+        const newDriver = {
+            transporter_id: document.getElementById('single-transporter-id').value.trim().toUpperCase(),
+            name: document.getElementById('single-name').value.trim(),
+            start_time: document.getElementById('single-start-time').value.trim(),
+            service_type: document.getElementById('single-service-type').value.trim(),
+            badge_id: '',
+            status: 'NO_SHOW'
+        };
+
+        if (!newDriver.transporter_id || !newDriver.name) {
+            return alert('Transporter ID and Name are required.');
+        }
+
+        try {
+            await db.runTransaction(async (transaction) => {
+                const rosterDoc = await transaction.get(dailyRosterDocRef);
+                let drivers = [];
+                if (rosterDoc.exists) {
+                    drivers = rosterDoc.data().drivers || [];
+                }
+                drivers.push(newDriver);
+                transaction.set(dailyRosterDocRef, { drivers: drivers });
+            });
+            alert('Driver added to roster successfully.');
+            addSingleDriverForm.reset();
+        } catch (error) {
+            console.error("Error adding single driver:", error);
+            alert("Could not add driver to the roster.");
+        }
+    };
+
+    const handleTableActions = async (e) => {
+        const target = e.target;
+        const driverId = target.dataset.id;
+        if (!driverId) return;
+
+        if (target.classList.contains('remove-btn')) {
+            if (!confirm(`Are you sure you want to remove driver ${driverId} from this roster?`)) return;
+            target.textContent = '...';
+            try {
+                await db.runTransaction(async (transaction) => {
+                    const rosterDoc = await transaction.get(dailyRosterDocRef);
+                    if (!rosterDoc.exists) return;
+                    let drivers = rosterDoc.data().drivers;
+                    const updatedDrivers = drivers.filter(d => d.transporter_id !== driverId);
+                    transaction.update(dailyRosterDocRef, { drivers: updatedDrivers });
+                });
+            } catch (error) {
+                console.error("Error removing driver:", error);
+                alert("Could not remove driver.");
+            }
+            return;
+        }
+
+        const updateDriverStatus = async (newStatus) => {
+            target.textContent = '...';
+             try {
+                await db.runTransaction(async (transaction) => {
+                    const rosterDoc = await transaction.get(dailyRosterDocRef);
+                    if (!rosterDoc.exists) throw new Error("Roster not found.");
+                    let drivers = rosterDoc.data().drivers;
+                    const driverIndex = drivers.findIndex(d => d.transporter_id === driverId);
+                    if (driverIndex > -1) {
+                        drivers[driverIndex].status = newStatus;
+                        transaction.update(dailyRosterDocRef, { drivers: drivers });
+                    }
+                });
+            } catch (error) {
+                console.error(`Error updating status to ${newStatus}:`, error);
+                alert(`Could not update status.`);
+            }
+        };
+
+        if (target.classList.contains('check-in-btn')) {
+            await updateDriverStatus('SHOW');
+        }
+
+        if (target.classList.contains('rescue-btn')) {
+            await updateDriverStatus('RESCUE');
+        }
+
+        if (target.classList.contains('edit-badge-btn')) {
+            const currentBadge = target.closest('tr').children[1].textContent;
+            const newBadgeId = prompt(`Enter new Badge ID for driver ${driverId}:`, currentBadge);
+            if (newBadgeId === null) return; 
+
+            target.textContent = '...';
+            try {
+                await db.runTransaction(async (transaction) => {
+                    const rosterDoc = await transaction.get(dailyRosterDocRef);
+                    if (!rosterDoc.exists) throw new Error("Roster not found.");
+                    
+                    let drivers = rosterDoc.data().drivers;
+                    const driverIndex = drivers.findIndex(d => d.transporter_id === driverId);
+                    if (driverIndex > -1) {
+                        drivers[driverIndex].badge_id = newBadgeId.trim().toUpperCase();
+                        transaction.update(dailyRosterDocRef, { drivers: drivers });
+                    }
+                });
+            } catch (error) {
+                console.error("Error updating badge ID:", error);
+                alert("Could not update badge ID.");
+            }
+        }
+    };
+
     dailyRosterDocRef.onSnapshot(doc => {
         if (doc.exists) {
             renderTable(doc.data().drivers);
         } else {
-            rosterBody.innerHTML = '<tr><td colspan="6">No roster has been set for today. Paste a list above to start.</td></tr>';
+            rosterBody.innerHTML = '<tr><td colspan="8">No roster has been set for today.</td></tr>';
         }
-    }, error => {
-        console.error("Error fetching live roster: ", error);
-        rosterBody.innerHTML = '<tr><td colspan="6">Connection to database failed.</td></tr>';
     });
     
-    // --- Event Listeners ---
     processBtn.addEventListener('click', processAndSaveList);
     resetBtn.addEventListener('click', resetRoster);
-
+    addSingleDriverForm.addEventListener('submit', addSingleDriver);
+    rosterBody.addEventListener('click', handleTableActions);
 </script>
 
 </body>
