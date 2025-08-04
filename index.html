@@ -23,7 +23,6 @@
                 <a href="caproster.html">CapRoster</a>
                 <a href="dashboard.html">Dashboard</a>
                 <a href="dalist.html">DA - List</a>
-                <a href="id-matcher.html">ID/DA Matcher</a>
             </nav>
         </div>
     </header>
@@ -47,16 +46,6 @@
         </div>
     </main>
     
-    <div id="popup-modal" class="modal-overlay" style="display: none;">
-        <div class="modal-content">
-            <h3>Unrecognized Badge ID</h3>
-            <p>The Badge ID <strong id="unassigned-badge-id"></strong> was not found. Please select a user without a Badge ID to assign it to them.</p>
-            <div id="badgeless-drivers-list" class="manual-list-container">
-                </div>
-            <button id="close-modal-btn" class="danger-btn">Cancel</button>
-        </div>
-    </div>
-    
     <footer>
         <p>&copy; Developed and Coded by Karim Elbeih Badawy (DAP8 Night Shift)</p>
     </footer>
@@ -77,33 +66,18 @@
     db.settings({ experimentalForceLongPolling: true });
 
     const dailyRosterDocRef = db.collection('daily_roster').doc('current');
-    const driversCollectionRef = db.collection('drivers');
 
     // --- DOM Elements ---
     const checkInForm = document.getElementById('check-in-form');
     const badgeIdInput = document.getElementById('badge-id-input');
     const driverInfoBox = document.getElementById('driver-info-box');
-    const popupModal = document.getElementById('popup-modal');
-    const unassignedBadgeIdEl = document.getElementById('unassigned-badge-id');
-    const badgelessDriversList = document.getElementById('badgeless-drivers-list');
-    const closeModalBtn = document.getElementById('close-modal-btn');
-
-    let scannedBadgeIdToAssign = null;
-
-    const normalizeName = (name) => {
-        if (!name) return '';
-        return name.toLowerCase().replace(/[,.]/g, '').split(' ').filter(Boolean).sort().join(' ');
-    };
     
-    /**
-     * Main check-in logic.
-     */
     const handleCheckIn = async (e) => {
         e.preventDefault();
-        const scannedBadgeId = badgeIdInput.value.trim().toUpperCase();
-        if (!scannedBadgeId) return;
+        const scannedId = badgeIdInput.value.trim().toUpperCase();
+        if (!scannedId) return;
 
-        driverInfoBox.innerHTML = `<p class="placeholder-text">Searching for Badge ID: ${scannedBadgeId}...</p>`;
+        driverInfoBox.innerHTML = `<p class="placeholder-text">Searching CapRoster for Badge ID: ${scannedId}...</p>`;
 
         try {
             const checkedInDriver = await db.runTransaction(async (transaction) => {
@@ -111,15 +85,12 @@
                 if (!rosterDoc.exists) throw new Error("No daily roster has been created yet.");
 
                 let dailyDrivers = rosterDoc.data().drivers || [];
-                const driverIndex = dailyDrivers.findIndex(driver => driver.badge_id === scannedBadgeId);
+                const driverIndex = dailyDrivers.findIndex(driver => driver.badge_id === scannedId);
 
-                if (driverIndex === -1) {
-                    // We throw a specific error code that we can catch later
-                    throw new Error("BADGE_ID_NOT_IN_ROSTER");
-                }
+                if (driverIndex === -1) throw new Error(`Driver with Badge ID ${scannedId} is not on today's roster.`);
                 
                 const driverData = dailyDrivers[driverIndex];
-                if (driverData.status === 'SHOW') {
+                if (driverData.status === 'SHOW' || driverData.status === 'RESCUE') {
                     return { ...driverData, alreadyCheckedIn: true };
                 }
 
@@ -132,111 +103,13 @@
 
         } catch (error) {
             console.error("Error during check-in: ", error);
-            // If the specific error is that the badge isn't in the roster, open the popup
-            if (error.message === "BADGE_ID_NOT_IN_ROSTER") {
-                openAssignPopup(scannedBadgeId);
-            } else {
-                showError(error.message);
-            }
+            showError(error.message);
         } finally {
-            if (popupModal.style.display === 'none') {
-                badgeIdInput.value = '';
-                badgeIdInput.focus();
-            }
+            badgeIdInput.value = '';
+            badgeIdInput.focus();
         }
     };
     
-    /**
-     * Popup Logic: Opens and populates the assignment popup with drivers who have no badge ID.
-     */
-    const openAssignPopup = async (badgeId) => {
-        scannedBadgeIdToAssign = badgeId;
-        unassignedBadgeIdEl.textContent = badgeId;
-        badgelessDriversList.innerHTML = '<p>Loading drivers without a Badge ID...</p>';
-        popupModal.style.display = 'flex';
-
-        const querySnapshot = await driversCollectionRef.where('badge_id', '==', '').get();
-
-        if (querySnapshot.empty) {
-            badgelessDriversList.innerHTML = '<p>No drivers without a Badge ID were found in the DA-List.</p>';
-            return;
-        }
-
-        const list = document.createElement('ul');
-        querySnapshot.forEach(doc => {
-            const driver = doc.data();
-            const listItem = document.createElement('li');
-            listItem.innerHTML = `
-                <span>${driver.employee_name} (${driver.transporter_id || 'No Transporter ID'})</span>
-                <button class="assign-btn" data-doc-id="${doc.id}" data-name="${driver.employee_name}">Assign</button>
-            `;
-            list.appendChild(listItem);
-        });
-        badgelessDriversList.innerHTML = '';
-        badgelessDriversList.appendChild(list);
-    };
-
-    const closeAssignPopup = () => {
-        popupModal.style.display = 'none';
-        scannedBadgeIdToAssign = null;
-        badgeIdInput.value = '';
-        badgeIdInput.focus();
-    };
-    
-    /**
-     * Handles assigning a badge to a driver from the popup.
-     */
-    const handleAssignBadge = async (e) => {
-        if (!e.target.classList.contains('assign-btn')) return;
-        
-        const button = e.target;
-        button.textContent = 'Saving...';
-        button.disabled = true;
-
-        const docId = e.target.dataset.docId;
-        const driverName = e.target.dataset.name;
-
-        if (!confirm(`Are you sure you want to assign Badge ID ${scannedBadgeIdToAssign} to ${driverName}?`)) {
-            button.textContent = 'Assign';
-            button.disabled = false;
-            return;
-        }
-
-        try {
-            // 1. Update the permanent DA-List record with the new badge ID
-            await driversCollectionRef.doc(docId).update({
-                badge_id: scannedBadgeIdToAssign
-            });
-
-            // 2. Update the daily CapRoster with the new badge ID
-            await db.runTransaction(async (transaction) => {
-                const rosterDoc = await transaction.get(dailyRosterDocRef);
-                if (!rosterDoc.exists) return; // Roster might have been reset
-
-                let dailyDrivers = rosterDoc.data().drivers || [];
-                const normalizedName = normalizeName(driverName);
-                const driverIndex = dailyDrivers.findIndex(d => normalizeName(d.name) === normalizedName);
-
-                if (driverIndex !== -1) {
-                    dailyDrivers[driverIndex].badge_id = scannedBadgeIdToAssign;
-                    transaction.update(dailyRosterDocRef, { drivers: dailyDrivers });
-                }
-            });
-
-            alert('Badge ID successfully assigned!');
-            closeAssignPopup();
-            // Automatically re-run the check-in process for the user
-            badgeIdInput.value = scannedBadgeIdToAssign;
-            checkInForm.requestSubmit();
-
-        } catch (error) {
-            console.error("Error assigning badge:", error);
-            alert("Could not assign badge.");
-            button.textContent = 'Assign';
-            button.disabled = false;
-        }
-    };
-
     const showSuccess = (rosterData, alreadyCheckedIn) => {
         const statusMessage = alreadyCheckedIn 
             ? `<h2 class="status-warn">ALREADY CHECKED IN</h2>` 
@@ -249,7 +122,7 @@
             <p><strong>Transporter ID:</strong> ${rosterData.transporter_id}</p>
             <p><strong>Badge ID:</strong> ${rosterData.badge_id}</p>
             <p><strong>Start Time:</strong> ${rosterData.start_time}</p>
-            <p><strong>Servicetyp:</strong> ${rosterData.service_type}</p>
+            <p><strong>Firmenname:</strong> ${rosterData.company_name}</p>
         `;
     };
 
@@ -258,11 +131,7 @@
         driverInfoBox.innerHTML = `<h2 class="status-error">${message}</h2>`;
     };
 
-    // --- Event Listeners ---
     checkInForm.addEventListener('submit', handleCheckIn);
-    closeModalBtn.addEventListener('click', closeAssignPopup);
-    badgelessDriversList.addEventListener('click', handleAssignBadge);
-    
     badgeIdInput.focus();
 </script>
 </body>

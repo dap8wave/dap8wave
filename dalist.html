@@ -14,55 +14,74 @@
 </head>
 <body>
 
-    <header>
-        <div class="header-content">
-            <img src="https://upload.wikimedia.org/wikipedia/commons/a/a9/Amazon_logo.svg" alt="Amazon Logo" class="amazon-logo">
-            <div class="header-title">Amazon DAP8 Wave Check</div>
-            <nav>
-                <a href="index.html">Wave Check</a>
-                <a href="caproster.html">CapRoster</a>
-                <a href="dashboard.html">Dashboard</a>
-                <a href="dalist.html" class="active">DA - List</a>
-                <a href="id-matcher.html">ID/DA Matcher</a>
-            </nav>
-        </div>
-    </header>
+    <div id="page-content" style="display: none; flex-direction: column; min-height: 100vh;">
 
-    <main>
-        <div class="page-title">
-            <h2>Driver Associate Master List</h2>
-        </div>
+        <header>
+            <div class="header-content">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/a/a9/Amazon_logo.svg" alt="Amazon Logo" class="amazon-logo">
+                <div class="header-title">Amazon DAP8 Wave Check</div>
+                <nav>
+                    <a href="index.html">Wave Check</a>
+                    <a href="caproster.html">CapRoster</a>
+                    <a href="dashboard.html">Dashboard</a>
+                    <a href="dalist.html" class="active">DA - List</a>
+                </nav>
+            </div>
+        </header>
 
-        <div class="form-container">
-            <h3>Add / Update Drivers in Bulk</h3>
-            <p class="instructions">Paste driver list from a spreadsheet. The **Badge Barcode ID (C)** must be unique and will be used as the key.</p>
-            <textarea id="bulk-paste-area" rows="10" placeholder="A: User ID	B: Employee Name	C: Badge Barcode ID	D: Temp Agency Code	E: Transporter ID..."></textarea>
-            <button id="bulk-add-btn" class="action-btn">Add List to Database</button>
-        </div>
+        <main>
+            <div class="page-title">
+                <h2>Driver Associate Master List</h2>
+            </div>
 
-        <div class="table-container">
-            <table id="da-list-table">
-                <thead>
-                    <tr>
-                        <th>A: User ID</th>
-                        <th>B: Employee Name</th>
-                        <th>C: Badge Barcode ID</th>
-                        <th>D: Temp Agency Code</th>
-                        <th>E: Transporter ID</th>
-                        <th>Action</th>
-                    </tr>
-                </thead>
-                <tbody id="da-list-body">
-                    </tbody>
-            </table>
-        </div>
-    </main>
+            <div class="form-container">
+                <h3>Add / Update Drivers in Bulk</h3>
+                <p class="instructions">Paste driver list from a spreadsheet. The **Badge Barcode ID (C)** must be unique and will be used as the key.</p>
+                <textarea id="bulk-paste-area" rows="10" placeholder="A: User ID	B: Employee Name	C: Badge Barcode ID	D: Temp Agency Code	E: Transporter ID..."></textarea>
+                <button id="bulk-add-btn" class="action-btn">Add List to Database</button>
+            </div>
 
-    <footer>
-        <p>&copy; Developed and Coded by Karim Elbeih Badawy (DAP8 Night Shift)</p>
-    </footer>
+            <div class="table-container">
+                <table id="da-list-table">
+                    <thead>
+                        <tr>
+                            <th>A: User ID</th>
+                            <th>B: Employee Name</th>
+                            <th>C: Badge Barcode ID</th>
+                            <th>D: Temp Agency Code</th>
+                            <th>E: Transporter ID</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="da-list-body">
+                        </tbody>
+                </table>
+            </div>
+        </main>
+
+        <footer style="margin-top: auto;">
+            <p>&copy; Developed and Coded by Karim Elbeih Badawy (DAP8 Night Shift)</p>
+        </footer>
+
+    </div>
 
 <script>
+    // --- Password Protection ---
+    document.addEventListener('DOMContentLoaded', () => {
+        const correctPassword = '22913322kK';
+        const enteredPassword = prompt("Please enter the password to access this page:");
+
+        if (enteredPassword === correctPassword) {
+            // If password is correct, show the page content
+            document.getElementById('page-content').style.display = 'flex';
+        } else {
+            // If password is wrong, show an alert and redirect
+            alert('Incorrect password. Access denied.');
+            window.location.href = 'index.html'; // Redirect to the main page
+        }
+    });
+
+
     // --- Firebase Configuration ---
     const firebaseConfig = {
       apiKey: "AIzaSyAsuz3Zq8IlV-JRDY4t0n2rbj6cTe1ipOY",
@@ -113,7 +132,6 @@
 
         if (!confirm(`You are about to add or update ${driversToAdd.length} drivers. Continue?`)) return;
 
-        // Use a batched write for efficiency
         const batch = db.batch();
         driversToAdd.forEach(driver => {
             const docRef = driversCollection.doc(driver.badge_id); // Use Badge ID as the unique document key

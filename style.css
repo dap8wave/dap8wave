@@ -39,20 +39,17 @@ header {
     padding: 10px 40px;
     border-bottom: 4px solid var(--amazon-orange);
 }
-
 .header-content {
     max-width: 1600px;
     margin: 0 auto;
     display: flex;
     align-items: center;
 }
-
 .amazon-logo {
     height: 35px;
     filter: brightness(0) invert(1);
     margin-right: 20px;
 }
-
 .header-title {
     font-size: 1.5rem;
     font-weight: 500;
@@ -64,7 +61,6 @@ nav {
     display: flex;
     gap: 10px;
 }
-
 nav a {
     color: var(--text-light);
     text-decoration: none;
@@ -75,11 +71,9 @@ nav a {
     border: 2px solid transparent;
     transition: background-color 0.3s ease, border-color 0.3s ease;
 }
-
 nav a:hover {
     background-color: var(--secondary-blue);
 }
-
 nav a.active {
     border-color: var(--amazon-orange);
     color: var(--amazon-orange);
@@ -95,19 +89,16 @@ main {
     padding: 20px;
     box-sizing: border-box;
 }
-
 .page-title {
     text-align: center;
     margin-bottom: 25px;
 }
-
 .page-title h2 {
     font-size: 2.5rem;
     margin: 0;
     margin-bottom: 10px;
     text-shadow: 1px 1px 3px rgba(0,0,0,0.4);
 }
-
 .time-display {
     font-family: 'Courier New', Courier, monospace;
     font-size: 1rem;
@@ -121,20 +112,17 @@ main {
     border-radius: 12px;
     margin-bottom: 40px;
 }
-
 .form-container h3, .results-container h3 {
     margin-top: 0;
     text-align: left;
     font-size: 1.5rem;
 }
-
 .form-container label {
     font-size: 1.5rem;
     font-weight: 500;
     margin-bottom: 10px;
     display: block;
 }
-
 .instructions {
     font-size: 0.9rem;
     color: #DDD;
@@ -142,7 +130,6 @@ main {
     margin-bottom: 15px;
     text-align: left;
 }
-
 #data-paste-area, #bulk-paste-area, #name-paste-area {
     width: 100%;
     box-sizing: border-box;
@@ -154,25 +141,21 @@ main {
     border-radius: 8px;
     margin-bottom: 20px;
 }
-
 .single-driver-form {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: 15px;
     align-items: center;
 }
-
 .single-driver-form input {
     padding: 12px;
     font-size: 1rem;
     border-radius: 8px;
     border: 1px solid var(--border-color);
 }
-
 .single-driver-form button {
     grid-column: 1 / -1;
 }
-
 @media (min-width: 980px) {
     .single-driver-form button {
         grid-column: auto;
@@ -185,7 +168,6 @@ main {
     justify-content: center;
     gap: 20px;
 }
-
 .action-btn {
     padding: 12px 28px;
     font-size: 1rem;
@@ -197,7 +179,6 @@ main {
     background-color: var(--amazon-orange);
     color: var(--text-dark);
 }
-
 .danger-btn {
     padding: 12px 28px;
     font-size: 1rem;
@@ -213,11 +194,9 @@ main {
 .table-container {
     overflow-x: auto;
 }
-
 .table-container h3 {
     text-align: left;
 }
-
 #roster-table, #da-list-table, #matched-table {
     width: 100%;
     border-collapse: collapse;
@@ -227,7 +206,6 @@ main {
     box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
     overflow: hidden;
 }
-
 #roster-table th, #roster-table td,
 #da-list-table th, #da-list-table td,
 #matched-table th, #matched-table td {
@@ -236,7 +214,6 @@ main {
     border-bottom: 1px solid #ddd;
     white-space: nowrap;
 }
-
 #roster-table thead tr, #da-list-table thead tr, #matched-table thead tr {
     background-color: var(--secondary-blue);
     color: var(--text-light);
@@ -244,7 +221,6 @@ main {
     position: sticky;
     top: 0;
 }
-
 #roster-table tbody tr.status-no-show { background-color: var(--row-color-no-show); }
 #roster-table tbody tr.status-show { background-color: var(--row-color-show); }
 #roster-table tbody tr.status-rescue { background-color: var(--row-color-rescue); } 
@@ -282,6 +258,10 @@ main {
 
 
 /* --- Dashboard Styles --- */
+.dashboard-controls {
+    margin-bottom: 20px;
+    text-align: left;
+}
 .dashboard-grid {
     display: grid;
     grid-template-columns: 2fr 1fr;
@@ -366,33 +346,26 @@ main {
     background-color: var(--amazon-orange);
     color: var(--text-dark);
 }
-.waves-info-box ul {
+#company-list, #waves-list {
     list-style: none;
     padding: 0;
     margin: 0;
     font-size: 1.1rem;
 }
-.waves-info-box li {
+#company-list li, #waves-list li {
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 8px 0;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
-.waves-info-box li:last-child {
+#company-list li:last-child, #waves-list li:last-child {
     border-bottom: none;
 }
-.wave-time-input {
-    background-color: rgba(255,255,255,0.1);
-    color: var(--text-light);
-    border: 1px solid var(--border-color);
-    border-radius: 5px;
-    padding: 5px;
-    width: 100px;
-}
-.wave-info {
+.company-info, .wave-info {
     display: flex;
     flex-direction: column;
+    gap: 4px;
 }
 .show-missing-btn {
     padding: 5px 10px;
@@ -404,7 +377,46 @@ main {
     background-color: var(--info-blue);
     color: white;
 }
-
+.wave-time-input {
+    background-color: rgba(255,255,255,0.1);
+    color: var(--text-light);
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    padding: 5px;
+    width: 100px;
+}
+.activity-log {
+    background-color: rgba(0, 0, 0, 0.25);
+    padding: 25px;
+    border-radius: 12px;
+    text-align: left;
+    margin-top: 20px;
+    grid-column: 1 / -1;
+}
+.activity-log h3 {
+    margin: 0 0 15px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.2);
+    padding-bottom: 10px;
+}
+.activity-log ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    max-height: 200px;
+    overflow-y: auto;
+    font-family: 'Courier New', Courier, monospace;
+}
+.activity-log li {
+    padding: 8px 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+.activity-log li.log-error {
+    color: var(--danger-red);
+}
+.log-time {
+    color: #999;
+    margin-right: 15px;
+}
 
 /* --- Wave Check Page & Popups --- */
 .check-in-container { text-align: center; }
@@ -460,6 +472,7 @@ main {
 .driver-info-box .status-warn { color: var(--warning-orange); }
 .driver-info-box .status-error { color: var(--danger-red); }
 
+/* Modal Styles */
 .modal-overlay {
     position: fixed;
     top: 0;
