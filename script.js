@@ -24,32 +24,50 @@ document.addEventListener('DOMContentLoaded', function() {
     const stationPageWrapper = document.querySelector('.station-page-wrapper');
 
     if (stationPageWrapper) {
-        // --- NEW: SIMPLE PASSWORD PROTECTION FOR STATION PAGES ---
+        // --- SIMPLE PASSWORD PROTECTION FOR STATION PAGES ---
         const stationId = stationPageWrapper.dataset.stationId;
+
+        // UPDATED: Added all German station passwords
         const stationPasswords = {
+            // Austrian Stations
             DAP8: 'amzDAP8',
             DVI3: 'amzDVI3',
             DVI2: 'amzDVI2',
             DAP5: 'amzDAP5',
-            DVI1: 'amzDVI1'
+            DVI1: 'amzDVI1',
+            // German Stations
+            DBB1: 'amzDBB1',
+            DBE1: 'amzDBE1',
+            DBE2: 'amzDBE2',
+            DMU1: 'amzDMU1',
+            DMU2: 'amzDMU2',
+            DNW1: 'amzDNW1',
+            DNW3: 'amzDNW3',
+            DNW7: 'amzDNW7',
+            DNW9: 'amzDNW9',
+            DHE1: 'amzDHE1',
+            DBW1: 'amzDBW1',
+            DTH1: 'amzDTH1',
+            DHB1: 'amzDHB1',
+            DNM6: 'amzDNM6',
+            DNM7: 'amzDNM7',
+            DHE3: 'amzDHE3',
+            DNM1: 'amzDNM1',
+            DSY2: 'amzDSY2',
+            DRP2: 'amzDRP2'
         };
 
         const correctPassword = stationPasswords[stationId];
-        // Check if the user has already entered the password for this session
         const sessionPassword = sessionStorage.getItem(`password_${stationId}`);
 
         if (sessionPassword === correctPassword) {
-            // If password is correct in session storage, load the page
             initializeStationPageLogic(stationPageWrapper, stationId);
         } else {
-            // Otherwise, prompt for password
             const enteredPassword = prompt(`Please enter the password for station ${stationId}:`);
             if (enteredPassword === correctPassword) {
-                // If password is correct, save it to session storage and load functions
                 sessionStorage.setItem(`password_${stationId}`, enteredPassword);
                 initializeStationPageLogic(stationPageWrapper, stationId);
             } else {
-                // If password is wrong or user clicks cancel, deny access
                 alert('Incorrect password. Access denied.');
                 window.location.href = 'index.html'; // Redirect to homepage
             }
