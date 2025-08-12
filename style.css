@@ -315,6 +315,144 @@ body {
 
 /*
    =================================================
+   LOGIN MODALS & METHODS
+   =================================================
+   The following styles define the appearance of the employee and admin
+   login modals introduced on the homepage and admin dashboard. Login
+   methods are presented as cards with icons allowing users to choose
+   between email/password or badge scanning. A simple scanning
+   animation is provided for badge-based logins. These components
+   follow the same dark theme and colour palette used throughout the
+   site for a cohesive look.
+*/
+
+/* Hide the legacy admin modal on station pages */
+#adminModal {
+    display: none !important;
+}
+
+/* Container for the two login method cards */
+.login-methods {
+    display: flex;
+    justify-content: center;
+    align-items: stretch;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    margin-top: 1rem;
+    width: 100%;
+}
+
+/* Individual login method card */
+.login-card {
+    flex: 1 1 200px;
+    max-width: 250px;
+    background-color: rgba(19, 25, 33, 0.7);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1.5rem;
+    text-align: center;
+    cursor: pointer;
+    transition: transform 0.3s ease, border-color 0.3s ease;
+}
+.login-card:hover {
+    transform: translateY(-5px);
+    border-color: var(--amazon-orange);
+}
+.login-card svg {
+    width: 50px;
+    height: 50px;
+    margin-bottom: 1rem;
+    fill: var(--amazon-orange);
+}
+.login-card h3 {
+    font-size: 1.2rem;
+    color: var(--text-light);
+    font-weight: 600;
+}
+
+/* Custom icon for login cards (used for email/password) */
+.login-card-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 60px;
+    height: 60px;
+    margin-bottom: 1rem;
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--amazon-orange);
+    background-color: rgba(19, 25, 33, 0.8);
+    border-radius: 8px;
+}
+
+/* Container for scanning animation with a stylised card behind */
+.scanner-frame {
+    position: relative;
+    width: 220px;
+    height: 220px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 1rem;
+}
+.badge-card {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #1f2e47, #243b6a);
+    border: 2px solid var(--border-color);
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+    z-index: 0;
+}
+/* Adjust scanning animation inside the frame */
+.scanner-frame .scan-animation {
+    position: absolute;
+    width: 180px;
+    height: 140px;
+    border-radius: 8px;
+    border: 2px dashed var(--border-color);
+    overflow: hidden;
+    z-index: 1;
+}
+.scanner-frame .scan-animation::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    width: 100%;
+    height: 4px;
+    background-color: var(--amazon-orange);
+    animation: scanMove 2s linear infinite;
+}
+
+/* Scanning animation for badge login */
+.scan-animation {
+    width: 200px;
+    height: 200px;
+    border: 2px dashed var(--border-color);
+    border-radius: 8px;
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 1rem;
+}
+.scan-animation::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    width: 100%;
+    height: 4px;
+    background-color: var(--amazon-orange);
+    animation: scanMove 2s linear infinite;
+}
+@keyframes scanMove {
+    0% { top: 0; }
+    100% { top: calc(100% - 4px); }
+}
+
+/*
+   =================================================
    ADMIN PAGE STYLES
    =================================================
 */
