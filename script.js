@@ -301,7 +301,7 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
             const badgeIdValue = scanInput.value.trim();
             if (!badgeIdValue) return;
 
-            const badgeIdAsString = badgeIdValue;
+            const badgeIdAsString = badgeIdValue.toString();
             const badgeIdAsNumber = parseInt(badgeIdValue, 10);
             
             const qString = query(rosterCollectionRef, where("badgeId", "==", badgeIdAsString));
@@ -343,11 +343,11 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
         addDaForm.addEventListener('submit', async event => {
             event.preventDefault();
             const newDriver = {
-                userId: addDaForm.userId.value,
-                name: addDaForm.name.value,
-                badgeId: addDaForm.badgeId.value,
-                companyName: addDaForm.companyName.value,
-                transporterId: addDaForm.transporterId.value
+                userId: addDaForm.userId.value.trim(),
+                name: addDaForm.name.value.trim(),
+                badgeId: addDaForm.badgeId.value.trim().toString(),
+                companyName: addDaForm.companyName.value.trim(),
+                transporterId: addDaForm.transporterId.value.trim()
             };
             await addDoc(daListCollectionRef, newDriver);
             // Log the addition of a driver to the master DA list
@@ -374,7 +374,14 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
                     const batch = writeBatch(db);
                     let processedCount = 0;
                     jsonData.forEach(row => {
-                        const newDriver = { userId: row['User ID'] || '', name: row['Employee Name'] || '', badgeId: row['Badge ID'] || '', companyName: row['Company Name'] || '', transporterId: row['Transporter ID'] || '' };
+                        const badgeIdFromExcel = (row['Badge ID'] || '').toString().trim();
+                        const newDriver = { 
+                            userId: (row['User ID'] || '').toString().trim(), 
+                            name: (row['Employee Name'] || '').toString().trim(), 
+                            badgeId: badgeIdFromExcel, 
+                            companyName: (row['Company Name'] || '').toString().trim(), 
+                            transporterId: (row['Transporter ID'] || '').toString().trim() 
+                        };
                         if (newDriver.userId && newDriver.name && newDriver.badgeId) {
                             const newDocRef = doc(daListCollectionRef);
                             batch.set(newDocRef, newDriver);
@@ -467,7 +474,7 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
     if (addDriverToRosterForm) {
         addDriverToRosterForm.addEventListener('submit', async event => {
             event.preventDefault();
-            const badgeId = addDriverToRosterForm.badgeId.value.trim();
+            const badgeId = addDriverToRosterForm.badgeId.value.trim().toString();
             const name = addDriverToRosterForm.name.value.trim();
             const startTime = addDriverToRosterForm.startTime.value.trim();
             const firmenname = addDriverToRosterForm.firmenname.value.trim();
@@ -606,8 +613,13 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
                         const rosterDoc = await getDoc(docRef);
                         if (!rosterDoc.exists()) return alert('Driver not found in roster.');
                         const currentDriver = rosterDoc.data();
-                        const newName = prompt("Enter the new Employee Name:", currentDriver.name);
-                        const newBadgeId = prompt("Enter the new Badge ID:", currentDriver.badgeId);
+                        
+                        let newName = prompt("Enter the new Employee Name:", currentDriver.name);
+                        let newBadgeId = prompt("Enter the new Badge ID:", currentDriver.badgeId);
+
+                        if (newName !== null) newName = newName.trim();
+                        if (newBadgeId !== null) newBadgeId = newBadgeId.trim().toString();
+
                         if ((newName && newName !== currentDriver.name) || (newBadgeId && newBadgeId !== currentDriver.badgeId)) {
                             await updateDoc(docRef, {
                                 name: newName || currentDriver.name,
