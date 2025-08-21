@@ -315,6 +315,71 @@ body {
 
 /*
    =================================================
+   WAVE STATS AND DASHBOARD EXTRAS
+   =================================================
+   Styles for the new wave statistics container and
+   for resizing the Drivers by Company menu on the
+   dashboard. The dashboard-extras container uses
+   flexbox to place the company stats and wave stats
+   side by side. The wave stats box includes buttons
+   for each wave and a list of missing drivers in
+   the selected wave.
+*/
+.dashboard-extras {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-top: 2rem;
+}
+.dashboard-extras .company-stats {
+    flex: 2;
+}
+.dashboard-extras .wave-stats {
+    flex: 1;
+    background-color: var(--secondary-blue);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+}
+.wave-stats h4 {
+    font-size: 1.2rem;
+    margin-bottom: 1rem;
+    color: #aaa;
+}
+.wave-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+.wave-btn {
+    padding: 0.4rem 0.8rem;
+    background-color: var(--secondary-blue);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: var(--text-light);
+}
+.wave-btn.active {
+    background-color: var(--amazon-orange);
+    color: var(--text-dark);
+}
+.wave-missing-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    max-height: 200px;
+    overflow-y: auto;
+}
+.wave-missing-list li {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.9rem;
+}
+
+/*
+   =================================================
    LOGIN MODALS & METHODS
    =================================================
    The following styles define the appearance of the employee and admin

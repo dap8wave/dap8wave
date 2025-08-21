@@ -253,6 +253,94 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
     const missingDriversModal = document.getElementById('missing-drivers-modal');
     const closeButtonMissing = document.querySelector('.close-button-missing');
 
+    // --- Wave Stats Elements and Data ---
+    // Elements for the wave statistics dashboard box. These will be present on
+    // station pages after modifying the HTML to include a wave container next
+    // to the Drivers by Company container. We initialize data structures for
+    // tracking wave-specific driver counts and the currently selected wave.
+    const waveButtonsContainer = document.getElementById('wave-buttons');
+    const waveMissingList = document.getElementById('wave-missing-list');
+    const waveShowDriversBtn = document.getElementById('wave-show-drivers-btn');
+    let waveData = {};
+    let selectedWave = null;
+
+    /**
+     * Compute the wave number for a given start time. Waves begin at 10:40,
+     * incrementing every 20 minutes thereafter (Wave 1 starts at 10:40,
+     * Wave 2 at 11:00, etc.). Drivers with a start time of 10:30 are
+     * considered part of a special "DPS" wave (wave number 0). Times
+     * earlier than 10:40 (other than 10:30) are ignored.
+     *
+     * @param {string} startTime - The start time in HH:MM format.
+     * @returns {number} The wave number, or -1 if it cannot be determined.
+     */
+    function computeWaveNumber(startTime) {
+        if (!startTime) return -1;
+        const parts = startTime.split(':');
+        if (parts.length < 2) return -1;
+        const hour = parseInt(parts[0], 10);
+        const minute = parseInt(parts[1], 10);
+        if (isNaN(hour) || isNaN(minute)) return -1;
+        // 10:30 represents a special DPS wave
+        if (hour === 10 && minute === 30) return 0;
+        const baseMinutes = 10 * 60 + 40; // 10:40 in minutes
+        const totalMinutes = hour * 60 + minute;
+        if (totalMinutes < baseMinutes) return -1;
+        return Math.floor((totalMinutes - baseMinutes) / 20) + 1;
+    }
+
+    /**
+     * Update the appearance of wave buttons to reflect the currently
+     * selected wave. The selected wave button will have the 'active'
+     * class applied to distinguish it.
+     */
+    function updateWaveButtonsUI() {
+        if (!waveButtonsContainer) return;
+        const buttons = waveButtonsContainer.querySelectorAll('.wave-btn');
+        buttons.forEach(btn => {
+            const numText = btn.innerText.split(' ')[1];
+            const num = parseInt(numText, 10);
+            if (num === selectedWave) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+    }
+
+    /**
+     * Display the list of drivers in the currently selected wave who have
+     * not yet checked in. The list is cleared and repopulated based on
+     * the selected wave each time the "Drivers" button is clicked.
+     */
+    function showWaveDrivers() {
+        if (!waveMissingList) return;
+        waveMissingList.innerHTML = '';
+        if (selectedWave === null || !waveData[selectedWave]) {
+            const li = document.createElement('li');
+            li.textContent = 'No drivers in this wave.';
+            waveMissingList.appendChild(li);
+            return;
+        }
+        const missing = waveData[selectedWave].drivers.filter(driver => driver.status !== 'Checked In');
+        if (missing.length === 0) {
+            const li = document.createElement('li');
+            li.textContent = 'No missing drivers in this wave.';
+            waveMissingList.appendChild(li);
+        } else {
+            missing.forEach(driver => {
+                const li = document.createElement('li');
+                li.textContent = `${driver.name} (${driver.badgeId || driver.badgeId})`;
+                waveMissingList.appendChild(li);
+            });
+        }
+    }
+
+    // Attach event listener for displaying drivers of the selected wave
+    if (waveShowDriversBtn) {
+        waveShowDriversBtn.addEventListener('click', showWaveDrivers);
+    }
+
     // --- Tab Switching Logic ---
     function activateTab(activeLink, targetPaneId) {
         tabLinks.forEach(innerLink => innerLink.classList.remove('active'));
@@ -301,7 +389,7 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
             const badgeIdValue = scanInput.value.trim();
             if (!badgeIdValue) return;
 
-            const badgeIdAsString = badgeIdValue.toString();
+            const badgeIdAsString = badgeIdValue;
             const badgeIdAsNumber = parseInt(badgeIdValue, 10);
             
             const qString = query(rosterCollectionRef, where("badgeId", "==", badgeIdAsString));
@@ -343,11 +431,11 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
         addDaForm.addEventListener('submit', async event => {
             event.preventDefault();
             const newDriver = {
-                userId: addDaForm.userId.value.trim(),
-                name: addDaForm.name.value.trim(),
-                badgeId: addDaForm.badgeId.value.trim().toString(),
-                companyName: addDaForm.companyName.value.trim(),
-                transporterId: addDaForm.transporterId.value.trim()
+                userId: addDaForm.userId.value,
+                name: addDaForm.name.value,
+                badgeId: addDaForm.badgeId.value,
+                companyName: addDaForm.companyName.value,
+                transporterId: addDaForm.transporterId.value
             };
             await addDoc(daListCollectionRef, newDriver);
             // Log the addition of a driver to the master DA list
@@ -374,14 +462,7 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
                     const batch = writeBatch(db);
                     let processedCount = 0;
                     jsonData.forEach(row => {
-                        const badgeIdFromExcel = (row['Badge ID'] || '').toString().trim();
-                        const newDriver = { 
-                            userId: (row['User ID'] || '').toString().trim(), 
-                            name: (row['Employee Name'] || '').toString().trim(), 
-                            badgeId: badgeIdFromExcel, 
-                            companyName: (row['Company Name'] || '').toString().trim(), 
-                            transporterId: (row['Transporter ID'] || '').toString().trim() 
-                        };
+                        const newDriver = { userId: row['User ID'] || '', name: row['Employee Name'] || '', badgeId: row['Badge ID'] || '', companyName: row['Company Name'] || '', transporterId: row['Transporter ID'] || '' };
                         if (newDriver.userId && newDriver.name && newDriver.badgeId) {
                             const newDocRef = doc(daListCollectionRef);
                             batch.set(newDocRef, newDriver);
@@ -434,6 +515,8 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
         let checkedInCount = 0;
         let rescueCount = 0;
         let companyData = {};
+        // Reset wave data on each snapshot update
+        waveData = {};
         snapshot.docs.forEach(doc => {
             const driver = doc.data();
             const row = document.createElement('tr');
@@ -449,6 +532,17 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
             if (!companyData[company]) { companyData[company] = { total: 0, checkedIn: 0 }; }
             companyData[company].total++;
             if (driver.status === 'Checked In') companyData[company].checkedIn++;
+
+            // Assign the driver to a wave based on startTime
+            const waveNum = computeWaveNumber(driver.startTime);
+            if (waveNum >= 0) {
+                if (!waveData[waveNum]) {
+                    waveData[waveNum] = { total: 0, checkedIn: 0, drivers: [] };
+                }
+                waveData[waveNum].total++;
+                if (driver.status === 'Checked In') waveData[waveNum].checkedIn++;
+                waveData[waveNum].drivers.push({ ...driver, id: doc.id });
+            }
         });
         const totalDrivers = snapshot.docs.length;
         const remainingDrivers = totalDrivers - checkedInCount - rescueCount;
@@ -469,12 +563,37 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
             companyCard.innerHTML = `<span class="company-name">${companyName}</span><span class="company-ratio">${stats.checkedIn} / ${stats.total}</span><button class="missing-btn" data-company="${companyName}">${missing} Missing</button>`;
             companyContainer.appendChild(companyCard);
         }
+
+        // Update wave buttons and their active state
+        if (waveButtonsContainer) {
+            waveButtonsContainer.innerHTML = '';
+            const waveNumbers = Object.keys(waveData).sort((a, b) => Number(a) - Number(b));
+            waveNumbers.forEach(numStr => {
+                const num = Number(numStr);
+                const btn = document.createElement('button');
+                btn.className = 'wave-btn';
+                btn.innerText = `Wave ${num}`;
+                if (num === selectedWave) btn.classList.add('active');
+                btn.addEventListener('click', () => {
+                    selectedWave = num;
+                    updateWaveButtonsUI();
+                    showWaveDrivers(); // <-- Show drivers immediately on click
+                });
+                waveButtonsContainer.appendChild(btn);
+            });
+            // If no wave selected yet, default to the first wave in the list
+            if (selectedWave === null && waveNumbers.length > 0) {
+                selectedWave = Number(waveNumbers[0]);
+                showWaveDrivers(); // <-- Show drivers for the default wave
+            }
+            updateWaveButtonsUI();
+        }
     });
 
     if (addDriverToRosterForm) {
         addDriverToRosterForm.addEventListener('submit', async event => {
             event.preventDefault();
-            const badgeId = addDriverToRosterForm.badgeId.value.trim().toString();
+            const badgeId = addDriverToRosterForm.badgeId.value.trim();
             const name = addDriverToRosterForm.name.value.trim();
             const startTime = addDriverToRosterForm.startTime.value.trim();
             const firmenname = addDriverToRosterForm.firmenname.value.trim();
@@ -613,13 +732,8 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
                         const rosterDoc = await getDoc(docRef);
                         if (!rosterDoc.exists()) return alert('Driver not found in roster.');
                         const currentDriver = rosterDoc.data();
-                        
-                        let newName = prompt("Enter the new Employee Name:", currentDriver.name);
-                        let newBadgeId = prompt("Enter the new Badge ID:", currentDriver.badgeId);
-
-                        if (newName !== null) newName = newName.trim();
-                        if (newBadgeId !== null) newBadgeId = newBadgeId.trim().toString();
-
+                        const newName = prompt("Enter the new Employee Name:", currentDriver.name);
+                        const newBadgeId = prompt("Enter the new Badge ID:", currentDriver.badgeId);
                         if ((newName && newName !== currentDriver.name) || (newBadgeId && newBadgeId !== currentDriver.badgeId)) {
                             await updateDoc(docRef, {
                                 name: newName || currentDriver.name,
