@@ -783,8 +783,12 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
                 } else {
                     querySnapshot.forEach(doc => {
                         const driver = doc.data();
+                        // Compute the wave number for this driver
+                        const waveNum = computeWaveNumber(driver.startTime);
+                        // Label: DSP/IW for wave 0, else Wave N
+                        const waveLabel = waveNum === 0 ? 'DSP/IW' : `Wave ${waveNum}`;
                         const li = document.createElement('li');
-                        li.textContent = driver.name;
+                        li.textContent = `${driver.name} (${waveLabel})`;
                         driverList.appendChild(li);
                     });
                 }
