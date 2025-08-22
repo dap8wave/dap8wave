@@ -572,19 +572,20 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
                 const num = Number(numStr);
                 const btn = document.createElement('button');
                 btn.className = 'wave-btn';
-                btn.innerText = `Wave ${num}`;
+                // If it's the first wave (num === 0), label as DSP/IW, else Wave N+1
+                btn.innerText = num === 0 ? 'DSP/IW' : `Wave ${num}`;
                 if (num === selectedWave) btn.classList.add('active');
                 btn.addEventListener('click', () => {
                     selectedWave = num;
                     updateWaveButtonsUI();
-                    showWaveDrivers(); // <-- Show drivers immediately on click
+                    showWaveDrivers();
                 });
                 waveButtonsContainer.appendChild(btn);
             });
             // If no wave selected yet, default to the first wave in the list
             if (selectedWave === null && waveNumbers.length > 0) {
                 selectedWave = Number(waveNumbers[0]);
-                showWaveDrivers(); // <-- Show drivers for the default wave
+                showWaveDrivers();
             }
             updateWaveButtonsUI();
         }
