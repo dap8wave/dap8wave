@@ -263,6 +263,8 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
     const waveShowDriversBtn = document.getElementById('wave-show-drivers-btn');
     let waveData = {};
     let selectedWave = null;
+    let timeToWave = {};      // <-- add this
+    let uniqueTimes = {};     // <-- add this
 
     /**
      * Compute the wave number for a given start time. Waves begin at 10:40,
@@ -276,17 +278,9 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
      */
     function computeWaveNumber(startTime) {
         if (!startTime) return -1;
-        const parts = startTime.split(':');
-        if (parts.length < 2) return -1;
-        const hour = parseInt(parts[0], 10);
-        const minute = parseInt(parts[1], 10);
-        if (isNaN(hour) || isNaN(minute)) return -1;
-        // 10:30 represents a special DPS wave
-        if (hour === 10 && minute === 30) return 0;
-        const baseMinutes = 10 * 60 + 40; // 10:40 in minutes
-        const totalMinutes = hour * 60 + minute;
-        if (totalMinutes < baseMinutes) return -1;
-        return Math.floor((totalMinutes - baseMinutes) / 20) + 1;
+        if (startTime === '10:30' || startTime === '8:30') return 0;
+        // Use the same uniqueTimes and timeToWave as above
+        return timeToWave[startTime] || -1;
     }
 
     /**
@@ -517,6 +511,58 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
         let companyData = {};
         // Reset wave data on each snapshot update
         waveData = {};
+
+        // 1. Collect all drivers and their start times
+        const allDrivers = [];
+        snapshot.docs.forEach(doc => {
+            const driver = doc.data();
+            allDrivers.push({ ...driver, id: doc.id });
+        });
+
+        // 2. Separate DSP/IW drivers (10:30 or 8:30) and others
+        const dspIwTimes = ['10:30', '8:30'];
+        const dspIwDrivers = allDrivers.filter(d => dspIwTimes.includes(d.startTime));
+        const normalDrivers = allDrivers.filter(d => !dspIwTimes.includes(d.startTime) && d.startTime);
+
+        // 3. Get unique, sorted start times for normal drivers
+        uniqueTimes = [...new Set(normalDrivers.map(d => d.startTime))]
+            .sort((a, b) => {
+                // Parse as minutes since midnight for correct sorting
+                const parse = t => {
+                    const m = t.match(/^(\d{1,2})[:.\-](\d{2})$/);
+                    if (m) return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+                    return Number.MAX_SAFE_INTEGER;
+                };
+                return parse(a) - parse(b);
+            });
+
+        // 4. Map each time to a wave number (Wave 1 = earliest, etc.)
+        timeToWave = {};
+        uniqueTimes.forEach((time, idx) => {
+            timeToWave[time] = idx + 1;
+        });
+
+        // 5. Assign drivers to waves
+        waveData = {};
+        // DSP/IW wave (wave 0)
+        if (dspIwDrivers.length > 0) {
+            waveData[0] = { total: 0, checkedIn: 0, drivers: [] };
+            dspIwDrivers.forEach(driver => {
+                waveData[0].total++;
+                if (driver.status === 'Checked In') waveData[0].checkedIn++;
+                waveData[0].drivers.push(driver);
+            });
+        }
+        // Normal waves
+        normalDrivers.forEach(driver => {
+            const waveNum = timeToWave[driver.startTime];
+            if (!waveNum) return;
+            if (!waveData[waveNum]) waveData[waveNum] = { total: 0, checkedIn: 0, drivers: [] };
+            waveData[waveNum].total++;
+            if (driver.status === 'Checked In') waveData[waveNum].checkedIn++;
+            waveData[waveNum].drivers.push(driver);
+        });
+
         snapshot.docs.forEach(doc => {
             const driver = doc.data();
             const row = document.createElement('tr');
@@ -532,17 +578,6 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
             if (!companyData[company]) { companyData[company] = { total: 0, checkedIn: 0 }; }
             companyData[company].total++;
             if (driver.status === 'Checked In') companyData[company].checkedIn++;
-
-            // Assign the driver to a wave based on startTime
-            const waveNum = computeWaveNumber(driver.startTime);
-            if (waveNum >= 0) {
-                if (!waveData[waveNum]) {
-                    waveData[waveNum] = { total: 0, checkedIn: 0, drivers: [] };
-                }
-                waveData[waveNum].total++;
-                if (driver.status === 'Checked In') waveData[waveNum].checkedIn++;
-                waveData[waveNum].drivers.push({ ...driver, id: doc.id });
-            }
         });
         const totalDrivers = snapshot.docs.length;
         const remainingDrivers = totalDrivers - checkedInCount - rescueCount;
@@ -776,19 +811,26 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
                 if (!companyName || !modalTitle || !driverList) return;
                 modalTitle.innerText = `Missing Drivers for ${companyName}`;
                 driverList.innerHTML = '';
-                const q = query(rosterCollectionRef, where("firmenname", "==", companyName), where("status", "!=", "Checked In"));
+                // Query only by company
+                const q = query(rosterCollectionRef, where("firmenname", "==", companyName));
                 const querySnapshot = await getDocs(q);
-                if (querySnapshot.empty) {
-                    driverList.innerHTML = '<li>No missing drivers for this company.</li>';
-                } else {
-                    querySnapshot.forEach(doc => {
-                        const driver = doc.data();
+                // Filter for drivers not checked in
+                const missingDrivers = [];
+                querySnapshot.forEach(doc => {
+                    const driver = doc.data();
+                    if (driver.status !== 'Checked In') {
                         // Compute the wave number for this driver
                         const waveNum = computeWaveNumber(driver.startTime);
-                        // Label: DSP/IW for wave 0, else Wave N
                         const waveLabel = waveNum === 0 ? 'DSP/IW' : `Wave ${waveNum}`;
+                        missingDrivers.push(`${driver.name} (${waveLabel})`);
+                    }
+                });
+                if (missingDrivers.length === 0) {
+                    driverList.innerHTML = '<li>No missing drivers for this company.</li>';
+                } else {
+                    missingDrivers.forEach(text => {
                         const li = document.createElement('li');
-                        li.textContent = `${driver.name} (${waveLabel})`;
+                        li.textContent = text;
                         driverList.appendChild(li);
                     });
                 }
