@@ -261,46 +261,22 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
     const waveButtonsContainer = document.getElementById('wave-buttons');
     const waveMissingList = document.getElementById('wave-missing-list');
     const waveShowDriversBtn = document.getElementById('wave-show-drivers-btn');
-    let waveData = {};
-    let selectedWave = null;
+    
+    // Updated data structures and variables for grouping by start time
+    let startTimeData = {};
+    let selectedStartTime = null;
 
     /**
-     * Compute the wave number for a given start time. Waves begin at 10:40,
-     * incrementing every 20 minutes thereafter (Wave 1 starts at 10:40,
-     * Wave 2 at 11:00, etc.). Drivers with a start time of 10:30 are
-     * considered part of a special "DPS" wave (wave number 0). Times
-     * earlier than 10:40 (other than 10:30) are ignored.
-     *
-     * @param {string} startTime - The start time in HH:MM format.
-     * @returns {number} The wave number, or -1 if it cannot be determined.
-     */
-    function computeWaveNumber(startTime) {
-        if (!startTime) return -1;
-        const parts = startTime.split(':');
-        if (parts.length < 2) return -1;
-        const hour = parseInt(parts[0], 10);
-        const minute = parseInt(parts[1], 10);
-        if (isNaN(hour) || isNaN(minute)) return -1;
-        // 10:30 represents a special DPS wave
-        if (hour === 10 && minute === 30) return 0;
-        const baseMinutes = 10 * 60 + 40; // 10:40 in minutes
-        const totalMinutes = hour * 60 + minute;
-        if (totalMinutes < baseMinutes) return -1;
-        return Math.floor((totalMinutes - baseMinutes) / 20) + 1;
-    }
-
-    /**
-     * Update the appearance of wave buttons to reflect the currently
-     * selected wave. The selected wave button will have the 'active'
-     * class applied to distinguish it.
+     * Update the appearance of start time buttons to reflect the currently
+     * selected start time. The selected button will have the 'active'
+     * class applied.
      */
     function updateWaveButtonsUI() {
         if (!waveButtonsContainer) return;
         const buttons = waveButtonsContainer.querySelectorAll('.wave-btn');
         buttons.forEach(btn => {
-            const numText = btn.innerText.split(' ')[1];
-            const num = parseInt(numText, 10);
-            if (num === selectedWave) {
+            const btnTime = btn.getAttribute('data-time');
+            if (btnTime === selectedStartTime) {
                 btn.classList.add('active');
             } else {
                 btn.classList.remove('active');
@@ -309,23 +285,22 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
     }
 
     /**
-     * Display the list of drivers in the currently selected wave who have
-     * not yet checked in. The list is cleared and repopulated based on
-     * the selected wave each time the "Drivers" button is clicked.
+     * Display the list of drivers in the currently selected start time
+     * group who have not yet checked in.
      */
     function showWaveDrivers() {
         if (!waveMissingList) return;
         waveMissingList.innerHTML = '';
-        if (selectedWave === null || !waveData[selectedWave]) {
+        if (!selectedStartTime || !startTimeData[selectedStartTime]) {
             const li = document.createElement('li');
-            li.textContent = 'No drivers in this wave.';
+            li.textContent = 'No drivers in this group.';
             waveMissingList.appendChild(li);
             return;
         }
-        const missing = waveData[selectedWave].drivers.filter(driver => driver.status !== 'Checked In');
+        const missing = startTimeData[selectedStartTime].drivers.filter(driver => driver.status !== 'Checked In');
         if (missing.length === 0) {
             const li = document.createElement('li');
-            li.textContent = 'No missing drivers in this wave.';
+            li.textContent = 'No missing drivers in this group.';
             waveMissingList.appendChild(li);
         } else {
             missing.forEach(driver => {
@@ -515,16 +490,26 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
         let checkedInCount = 0;
         let rescueCount = 0;
         let companyData = {};
-        // Reset wave data on each snapshot update
-        waveData = {};
-        snapshot.docs.forEach(doc => {
-            const driver = doc.data();
+        
+        // Group data by start time
+        startTimeData = {};
+
+        const drivers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+        const uniqueStartTimes = Array.from(new Set(drivers.map(d => d.startTime))).sort((a, b) => {
+            const timeA = a.split(':').map(Number);
+            const timeB = b.split(':').map(Number);
+            if (timeA[0] !== timeB[0]) return timeA[0] - timeB[0];
+            return timeA[1] - timeB[1];
+        });
+
+        drivers.forEach(driver => {
             const row = document.createElement('tr');
             let statusClass = 'status-awaiting';
             if (driver.status === 'Checked In') statusClass = 'status-checked-in';
             else if (driver.status === 'On Rescue') statusClass = 'status-on-rescue';
             row.className = statusClass;
-            row.innerHTML = `<td>${driver.transporterId || 'N/A'}</td><td>${driver.badgeId || 'N/A'}</td><td>${driver.name}</td><td>${driver.startTime}</td><td>${driver.firmenname}</td><td>${driver.status}</td><td class="actions-cell"><button class="action-btn btn-edit" data-collection="roster" data-id="${doc.id}">Edit</button><button class="action-btn btn-rescue" data-collection="roster" data-id="${doc.id}">Rescue</button><button class="action-btn btn-check-in" data-collection="roster" data-id="${doc.id}">Check-In</button><button class="action-btn btn-delete" data-collection="roster" data-id="${doc.id}">Delete</button></td>`;
+            row.innerHTML = `<td>${driver.transporterId || 'N/A'}</td><td>${driver.badgeId || 'N/A'}</td><td>${driver.name}</td><td>${driver.startTime}</td><td>${driver.firmenname}</td><td>${driver.status}</td><td class="actions-cell"><button class="action-btn btn-edit" data-collection="roster" data-id="${driver.id}">Edit</button><button class="action-btn btn-rescue" data-collection="roster" data-id="${driver.id}">Rescue</button><button class="action-btn btn-check-in" data-collection="roster" data-id="${driver.id}">Check-In</button><button class="action-btn btn-delete" data-collection="roster" data-id="${driver.id}">Delete</button></td>`;
             rosterTableBody.appendChild(row);
             if (driver.status === 'Checked In') checkedInCount++;
             if (driver.status === 'On Rescue') rescueCount++;
@@ -533,17 +518,16 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
             companyData[company].total++;
             if (driver.status === 'Checked In') companyData[company].checkedIn++;
 
-            // Assign the driver to a wave based on startTime
-            const waveNum = computeWaveNumber(driver.startTime);
-            if (waveNum >= 0) {
-                if (!waveData[waveNum]) {
-                    waveData[waveNum] = { total: 0, checkedIn: 0, drivers: [] };
-                }
-                waveData[waveNum].total++;
-                if (driver.status === 'Checked In') waveData[waveNum].checkedIn++;
-                waveData[waveNum].drivers.push({ ...driver, id: doc.id });
+            // Group drivers by their exact start time
+            const startTime = driver.startTime;
+            if (!startTimeData[startTime]) {
+                startTimeData[startTime] = { total: 0, checkedIn: 0, drivers: [] };
             }
+            startTimeData[startTime].total++;
+            if (driver.status === 'Checked In') startTimeData[startTime].checkedIn++;
+            startTimeData[startTime].drivers.push(driver);
         });
+
         const totalDrivers = snapshot.docs.length;
         const remainingDrivers = totalDrivers - checkedInCount - rescueCount;
         const progress = totalDrivers > 0 ? Math.round((checkedInCount / totalDrivers) * 100) : 0;
@@ -564,27 +548,25 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
             companyContainer.appendChild(companyCard);
         }
 
-        // Update wave buttons and their active state
+        // Update wave buttons with start times
         if (waveButtonsContainer) {
             waveButtonsContainer.innerHTML = '';
-            const waveNumbers = Object.keys(waveData).sort((a, b) => Number(a) - Number(b));
-            waveNumbers.forEach(numStr => {
-                const num = Number(numStr);
+            uniqueStartTimes.forEach(time => {
                 const btn = document.createElement('button');
                 btn.className = 'wave-btn';
-                // If it's the first wave (num === 0), label as DSP/IW, else Wave N+1
-                btn.innerText = num === 0 ? 'DSP/IW' : `Wave ${num}`;
-                if (num === selectedWave) btn.classList.add('active');
+                btn.innerText = time === '08:30' || time === '10:30' ? 'DSP/IW' : time;
+                btn.setAttribute('data-time', time); // Store the original time
+                if (time === selectedStartTime) btn.classList.add('active');
                 btn.addEventListener('click', () => {
-                    selectedWave = num;
+                    selectedStartTime = time;
                     updateWaveButtonsUI();
                     showWaveDrivers();
                 });
                 waveButtonsContainer.appendChild(btn);
             });
-            // If no wave selected yet, default to the first wave in the list
-            if (selectedWave === null && waveNumbers.length > 0) {
-                selectedWave = Number(waveNumbers[0]);
+            // If no start time selected yet, default to the first one in the list
+            if (selectedStartTime === null && uniqueStartTimes.length > 0) {
+                selectedStartTime = uniqueStartTimes[0];
                 showWaveDrivers();
             }
             updateWaveButtonsUI();
@@ -783,12 +765,8 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
                 } else {
                     querySnapshot.forEach(doc => {
                         const driver = doc.data();
-                        // Compute the wave number for this driver
-                        const waveNum = computeWaveNumber(driver.startTime);
-                        // Label: DSP/IW for wave 0, else Wave N
-                        const waveLabel = waveNum === 0 ? 'DSP/IW' : `Wave ${waveNum}`;
                         const li = document.createElement('li');
-                        li.textContent = `${driver.name} (${waveLabel})`;
+                        li.textContent = driver.name;
                         driverList.appendChild(li);
                     });
                 }
