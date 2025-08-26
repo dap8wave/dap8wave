@@ -380,10 +380,14 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
                 const rosterDoc = querySnapshot.docs[0];
                 const driverData = rosterDoc.data();
                 if (driverData.status === 'Checked In') {
-                    scannerOutput.innerHTML = `<h2 class="status-heading status-info">ALREADY CHECKED IN</h2><div class="scan-details"><p><strong>Name:</strong> ${driverData.name}</p><p><strong>Badge ID:</strong> ${driverData.badgeId}</p></div>`;
+                    // If already checked in, display the stored check-in time if available
+                    const timeText = driverData.checkInTime ? ` at ${driverData.checkInTime}` : '';
+                    scannerOutput.innerHTML = `<h2 class="status-heading status-info">ALREADY CHECKED IN</h2><div class="scan-details"><p><strong>Name:</strong> ${driverData.name}</p><p><strong>Badge ID:</strong> ${driverData.badgeId}</p><p><strong>Checked in</strong>${timeText}</p></div>`;
                 } else {
-                    await updateDoc(rosterDoc.ref, { status: 'Checked In' });
-                    scannerOutput.innerHTML = `<h2 class="status-heading status-success">CHECK-IN SUCCESSFUL</h2><div class="scan-details"><p><strong>Name:</strong> ${driverData.name}</p><p><strong>Transporter ID:</strong> ${driverData.transporterId}</p><p><strong>Badge ID:</strong> ${driverData.badgeId}</p><p><strong>Start Time:</strong> ${driverData.startTime}</p><p><strong>Company Name:</strong> ${driverData.firmenname}</p></div>`;
+                    // Record the current time for check-in and update Firestore with checkInTime property
+                    const currentTime = new Date().toLocaleTimeString('en-GB', { hour12: false });
+                    await updateDoc(rosterDoc.ref, { status: 'Checked In', checkInTime: currentTime });
+                    scannerOutput.innerHTML = `<h2 class="status-heading status-success">CHECK-IN SUCCESSFUL</h2><div class="scan-details"><p><strong>Name:</strong> ${driverData.name}</p><p><strong>Transporter ID:</strong> ${driverData.transporterId}</p><p><strong>Badge ID:</strong> ${driverData.badgeId}</p><p><strong>Start Time:</strong> ${driverData.startTime}</p><p><strong>Company Name:</strong> ${driverData.firmenname}</p><p><strong>Checked In At:</strong> ${currentTime}</p></div>`;
                 }
             }
             scanInput.value = '';
@@ -509,7 +513,12 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
             if (driver.status === 'Checked In') statusClass = 'status-checked-in';
             else if (driver.status === 'On Rescue') statusClass = 'status-on-rescue';
             row.className = statusClass;
-            row.innerHTML = `<td>${driver.transporterId || 'N/A'}</td><td>${driver.badgeId || 'N/A'}</td><td>${driver.name}</td><td>${driver.startTime}</td><td>${driver.firmenname}</td><td>${driver.status}</td><td class="actions-cell"><button class="action-btn btn-edit" data-collection="roster" data-id="${driver.id}">Edit</button><button class="action-btn btn-rescue" data-collection="roster" data-id="${driver.id}">Rescue</button><button class="action-btn btn-check-in" data-collection="roster" data-id="${driver.id}">Check-In</button><button class="action-btn btn-delete" data-collection="roster" data-id="${driver.id}">Delete</button></td>`;
+            // Build the status text and include check-in time if the driver is checked in
+            let statusText = driver.status;
+            if (driver.status === 'Checked In' && driver.checkInTime) {
+                statusText = `${driver.status} (${driver.checkInTime})`;
+            }
+            row.innerHTML = `<td>${driver.transporterId || 'N/A'}</td><td>${driver.badgeId || 'N/A'}</td><td>${driver.name}</td><td>${driver.startTime}</td><td>${driver.firmenname}</td><td>${statusText}</td><td class="actions-cell"><button class="action-btn btn-edit" data-collection="roster" data-id="${driver.id}">Edit</button><button class="action-btn btn-rescue" data-collection="roster" data-id="${driver.id}">Rescue</button><button class="action-btn btn-check-in" data-collection="roster" data-id="${driver.id}">Check-In</button><button class="action-btn btn-delete" data-collection="roster" data-id="${driver.id}">Delete</button></td>`;
             rosterTableBody.appendChild(row);
             if (driver.status === 'Checked In') checkedInCount++;
             if (driver.status === 'On Rescue') rescueCount++;
@@ -705,8 +714,10 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
                         addLog('deleteEntry', `Deleted entry ${id} from ${collectionName} at station ${stationId}`, stationId);
                     }
                 } else if (target.classList.contains('btn-check-in')) {
-                    await updateDoc(docRef, { status: 'Checked In' });
-                    addLog('updateStatus', `Checked in driver with ID ${id} at station ${stationId}`, stationId);
+                    // When manually checking in a driver, record the exact time of check-in
+                    const currentTime = new Date().toLocaleTimeString('en-GB', { hour12: false });
+                    await updateDoc(docRef, { status: 'Checked In', checkInTime: currentTime });
+                    addLog('updateStatus', `Checked in driver with ID ${id} at station ${stationId} at ${currentTime}`, stationId);
                 } else if (target.classList.contains('btn-rescue')) {
                     await updateDoc(docRef, { status: 'On Rescue' });
                     addLog('updateStatus', `Marked driver with ID ${id} as On Rescue at station ${stationId}`, stationId);
