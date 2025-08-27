@@ -261,6 +261,17 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
     const waveButtonsContainer = document.getElementById('wave-buttons');
     const waveMissingList = document.getElementById('wave-missing-list');
     const waveShowDriversBtn = document.getElementById('wave-show-drivers-btn');
+
+    // --- Communication Buttons ---
+    // Buttons for sending notifications via Slack or Amazon Chime. These are
+    // defined in the dashboard HTML and may not exist on all pages until
+    // the HTML is updated. We store references here and set up event
+    // listeners later. We also maintain a local cache of the latest
+    // roster snapshot in currentDrivers so that messages can be generated
+    // outside the snapshot callback.
+    const slackBtn = document.getElementById('slack-btn');
+    const chimeBtn = document.getElementById('chime-btn');
+    let currentDrivers = [];
     
     // Updated data structures and variables for grouping by start time
     let startTimeData = {};
@@ -297,7 +308,8 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
             waveMissingList.appendChild(li);
             return;
         }
-        const missing = startTimeData[selectedStartTime].drivers.filter(driver => driver.status !== 'Checked In');
+        // Consider drivers checked in with or without a badge as present
+        const missing = startTimeData[selectedStartTime].drivers.filter(driver => driver.status !== 'Checked In' && driver.status !== 'Checked In NO BADGE');
         if (missing.length === 0) {
             const li = document.createElement('li');
             li.textContent = 'No missing drivers in this group.';
@@ -379,15 +391,16 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
             } else {
                 const rosterDoc = querySnapshot.docs[0];
                 const driverData = rosterDoc.data();
-                if (driverData.status === 'Checked In') {
-                    // If already checked in, display the stored check-in time if available
-                    const timeText = driverData.checkInTime ? ` at ${driverData.checkInTime}` : '';
-                    scannerOutput.innerHTML = `<h2 class="status-heading status-info">ALREADY CHECKED IN</h2><div class="scan-details"><p><strong>Name:</strong> ${driverData.name}</p><p><strong>Badge ID:</strong> ${driverData.badgeId}</p><p><strong>Checked in</strong>${timeText}</p></div>`;
+                // If the driver is already checked in (with or without a badge), show the existing check-in time if available
+                if (driverData.status === 'Checked In' || driverData.status === 'Checked In NO BADGE') {
+                    const timeStamp = driverData.checkInTime ? ` at ${driverData.checkInTime}` : '';
+                    const statusLabel = driverData.status === 'Checked In NO BADGE' ? 'ALREADY CHECKED IN (NO BADGE)' : 'ALREADY CHECKED IN';
+                    scannerOutput.innerHTML = `<h2 class="status-heading status-info">${statusLabel}</h2><div class="scan-details"><p><strong>Name:</strong> ${driverData.name}</p><p><strong>Badge ID:</strong> ${driverData.badgeId}</p>${timeStamp ? `<p><strong>Time:</strong> ${driverData.checkInTime}</p>` : ''}</div>`;
                 } else {
-                    // Record the current time for check-in and update Firestore with checkInTime property
+                    // Record the current time when checking in via the scanner
                     const currentTime = new Date().toLocaleTimeString('en-GB', { hour12: false });
                     await updateDoc(rosterDoc.ref, { status: 'Checked In', checkInTime: currentTime });
-                    scannerOutput.innerHTML = `<h2 class="status-heading status-success">CHECK-IN SUCCESSFUL</h2><div class="scan-details"><p><strong>Name:</strong> ${driverData.name}</p><p><strong>Transporter ID:</strong> ${driverData.transporterId}</p><p><strong>Badge ID:</strong> ${driverData.badgeId}</p><p><strong>Start Time:</strong> ${driverData.startTime}</p><p><strong>Company Name:</strong> ${driverData.firmenname}</p><p><strong>Checked In At:</strong> ${currentTime}</p></div>`;
+                    scannerOutput.innerHTML = `<h2 class="status-heading status-success">CHECK-IN SUCCESSFUL</h2><div class="scan-details"><p><strong>Name:</strong> ${driverData.name}</p><p><strong>Transporter ID:</strong> ${driverData.transporterId}</p><p><strong>Badge ID:</strong> ${driverData.badgeId}</p><p><strong>Start Time:</strong> ${driverData.startTime}</p><p><strong>Company Name:</strong> ${driverData.firmenname}</p><p><strong>Time:</strong> ${currentTime}</p></div>`;
                 }
             }
             scanInput.value = '';
@@ -499,6 +512,8 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
         startTimeData = {};
 
         const drivers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        // Update the currentDrivers cache for communication buttons
+        currentDrivers = drivers;
 
         const uniqueStartTimes = Array.from(new Set(drivers.map(d => d.startTime))).sort((a, b) => {
             const timeA = a.split(':').map(Number);
@@ -509,23 +524,30 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
 
         drivers.forEach(driver => {
             const row = document.createElement('tr');
+            // Determine the appropriate row color class based on the driver's status, including a new class for check-ins without a badge
             let statusClass = 'status-awaiting';
-            if (driver.status === 'Checked In') statusClass = 'status-checked-in';
-            else if (driver.status === 'On Rescue') statusClass = 'status-on-rescue';
+            if (driver.status === 'Checked In') {
+                statusClass = 'status-checked-in';
+            } else if (driver.status === 'On Rescue') {
+                statusClass = 'status-on-rescue';
+            } else if (driver.status === 'Checked In NO BADGE') {
+                statusClass = 'status-no-badge';
+            }
             row.className = statusClass;
-            // Build the status text and include check-in time if the driver is checked in
+            // Build a readable status text. When a driver is checked in (with or without a badge), append the stored check-in time.
             let statusText = driver.status;
-            if (driver.status === 'Checked In' && driver.checkInTime) {
+            if ((driver.status === 'Checked In' || driver.status === 'Checked In NO BADGE') && driver.checkInTime) {
                 statusText = `${driver.status} (${driver.checkInTime})`;
             }
-            row.innerHTML = `<td>${driver.transporterId || 'N/A'}</td><td>${driver.badgeId || 'N/A'}</td><td>${driver.name}</td><td>${driver.startTime}</td><td>${driver.firmenname}</td><td>${statusText}</td><td class="actions-cell"><button class="action-btn btn-edit" data-collection="roster" data-id="${driver.id}">Edit</button><button class="action-btn btn-rescue" data-collection="roster" data-id="${driver.id}">Rescue</button><button class="action-btn btn-check-in" data-collection="roster" data-id="${driver.id}">Check-In</button><button class="action-btn btn-delete" data-collection="roster" data-id="${driver.id}">Delete</button></td>`;
+            // Populate the row HTML, including a new action button to mark a driver as checked in without a badge
+            row.innerHTML = `<td>${driver.transporterId || 'N/A'}</td><td>${driver.badgeId || 'N/A'}</td><td>${driver.name}</td><td>${driver.startTime}</td><td>${driver.firmenname}</td><td>${statusText}</td><td class="actions-cell"><button class="action-btn btn-edit" data-collection="roster" data-id="${driver.id}">Edit</button><button class="action-btn btn-rescue" data-collection="roster" data-id="${driver.id}">Rescue</button><button class="action-btn btn-check-in" data-collection="roster" data-id="${driver.id}">Check-In</button><button class="action-btn btn-no-badge" data-collection="roster" data-id="${driver.id}">No Badge</button><button class="action-btn btn-delete" data-collection="roster" data-id="${driver.id}">Delete</button></td>`;
             rosterTableBody.appendChild(row);
-            if (driver.status === 'Checked In') checkedInCount++;
+            if (driver.status === 'Checked In' || driver.status === 'Checked In NO BADGE') checkedInCount++;
             if (driver.status === 'On Rescue') rescueCount++;
             const company = driver.firmenname || 'Unknown';
             if (!companyData[company]) { companyData[company] = { total: 0, checkedIn: 0 }; }
             companyData[company].total++;
-            if (driver.status === 'Checked In') companyData[company].checkedIn++;
+            if (driver.status === 'Checked In' || driver.status === 'Checked In NO BADGE') companyData[company].checkedIn++;
 
             // Group drivers by their exact start time
             const startTime = driver.startTime;
@@ -533,7 +555,7 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
                 startTimeData[startTime] = { total: 0, checkedIn: 0, drivers: [] };
             }
             startTimeData[startTime].total++;
-            if (driver.status === 'Checked In') startTimeData[startTime].checkedIn++;
+            if (driver.status === 'Checked In' || driver.status === 'Checked In NO BADGE') startTimeData[startTime].checkedIn++;
             startTimeData[startTime].drivers.push(driver);
         });
 
@@ -714,10 +736,15 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
                         addLog('deleteEntry', `Deleted entry ${id} from ${collectionName} at station ${stationId}`, stationId);
                     }
                 } else if (target.classList.contains('btn-check-in')) {
-                    // When manually checking in a driver, record the exact time of check-in
+                    // When checking in a driver, record the exact time of check-in
                     const currentTime = new Date().toLocaleTimeString('en-GB', { hour12: false });
                     await updateDoc(docRef, { status: 'Checked In', checkInTime: currentTime });
                     addLog('updateStatus', `Checked in driver with ID ${id} at station ${stationId} at ${currentTime}`, stationId);
+                } else if (target.classList.contains('btn-no-badge')) {
+                    // When a driver has no badge, mark as checked in with a special status and record the time
+                    const currentTime = new Date().toLocaleTimeString('en-GB', { hour12: false });
+                    await updateDoc(docRef, { status: 'Checked In NO BADGE', checkInTime: currentTime });
+                    addLog('updateStatus', `Marked driver with ID ${id} as Checked In NO BADGE at station ${stationId} at ${currentTime}`, stationId);
                 } else if (target.classList.contains('btn-rescue')) {
                     await updateDoc(docRef, { status: 'On Rescue' });
                     addLog('updateStatus', `Marked driver with ID ${id} as On Rescue at station ${stationId}`, stationId);
@@ -769,7 +796,8 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
                 if (!companyName || !modalTitle || !driverList) return;
                 modalTitle.innerText = `Missing Drivers for ${companyName}`;
                 driverList.innerHTML = '';
-                const q = query(rosterCollectionRef, where("firmenname", "==", companyName), where("status", "!=", "Checked In"));
+                // Exclude both normal checked-in drivers and those with no badge from the missing list
+                const q = query(rosterCollectionRef, where("firmenname", "==", companyName), where("status", "not-in", ["Checked In", "Checked In NO BADGE"]));
                 const querySnapshot = await getDocs(q);
                 if (querySnapshot.empty) {
                     driverList.innerHTML = '<li>No missing drivers for this company.</li>';
@@ -785,6 +813,64 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
             }
         });
     }
+
+    // === Communication Buttons Logic ===
+    // Generate a summary of drivers who have not checked in or who have been flagged as having no badge.
+    function prepareCommunicationMessage() {
+        if (!currentDrivers || currentDrivers.length === 0) return '';
+        // Identify drivers whose status is not 'Checked In' (normal) or drivers marked as 'Checked In NO BADGE'
+        const missing = currentDrivers.filter(d => d.status !== 'Checked In');
+        if (missing.length === 0) return '';
+        let message = '';
+        // Separate drivers by categories
+        const noShow = missing.filter(d => d.status !== 'Checked In NO BADGE');
+        const noBadge = missing.filter(d => d.status === 'Checked In NO BADGE');
+        if (noShow.length > 0) {
+            message += 'Drivers who have not shown up:\n';
+            noShow.forEach((d, idx) => {
+                message += `${idx + 1}. Name: ${d.name}, Badge: ${d.badgeId || 'N/A'}, Transporter: ${d.transporterId || 'N/A'}, Start Time: ${d.startTime}, Company: ${d.firmenname}, Status: ${d.status}\n`;
+            });
+            message += '\n';
+        }
+        if (noBadge.length > 0) {
+            message += 'Drivers with no badge:\n';
+            noBadge.forEach((d, idx) => {
+                message += `${idx + 1}. Name: ${d.name}, Badge: ${d.badgeId || 'N/A'}, Transporter: ${d.transporterId || 'N/A'}, Start Time: ${d.startTime}, Company: ${d.firmenname}, Status: ${d.status}\n`;
+            });
+            message += '\n';
+        }
+        return message;
+    }
+
+    // Attempt to open Slack or Amazon Chime and copy message to clipboard. If opening fails, fall back to mailto.
+    function sendCommunication(type) {
+        const message = prepareCommunicationMessage();
+        if (!message) {
+            alert('No drivers to report. All drivers are accounted for.');
+            return;
+        }
+        // Copy message to clipboard if possible
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(message);
+            }
+        } catch (err) {
+            console.error('Clipboard write failed', err);
+        }
+        // Attempt to open Slack or Chime
+        if (type === 'slack') {
+            // Open Slack via its web client. The message is already in the clipboard.
+            window.open('https://app.slack.com/client', '_blank');
+        } else if (type === 'chime') {
+            // Open Amazon Chime’s web app. The message is already in the clipboard.
+            window.open('https://app.chime.aws/', '_blank');
+        }
+        alert('Die Nachricht wurde in die Zwischenablage kopiert. Öffne das Kommunikations‑Tool und füge sie dort ein.');
+    }
+
+    // Attach event listeners to Slack and Chime buttons if they exist
+    if (slackBtn) slackBtn.addEventListener('click', () => sendCommunication('slack'));
+    if (chimeBtn) chimeBtn.addEventListener('click', () => sendCommunication('chime'));
 }
 
 // ======================================================================

@@ -15,6 +15,10 @@
     --row-color-no-show: #5a2a2a;
     --row-color-show: #1c4a2a;
     --row-color-rescue: #2a3a5a;
+    /* New colour definitions for drivers with no badge and communication buttons */
+    --row-color-no-badge: #5a2241;
+    --slack-purple: #4A154B;
+    --chime-blue: #0075CC;
 }
 
 /* Basic reset and font settings for the whole page */
@@ -233,6 +237,56 @@ body {
 .data-table tr.status-checked-in { background-color: var(--row-color-show); }
 .data-table tr.status-awaiting { background-color: var(--row-color-no-show); }
 .data-table tr.status-on-rescue { background-color: var(--row-color-rescue); }
+/* Style for rows representing drivers who checked in without a badge */
+.data-table tr.status-no-badge {
+    background-color: var(--row-color-no-badge);
+}
+
+/* Style for the No Badge action button in the roster */
+.btn-no-badge {
+    background-color: var(--row-color-no-badge);
+    color: var(--text-light);
+}
+
+/*
+   =================================================
+   COMMUNICATION BUTTONS
+   =================================================
+   The dashboard includes buttons for communicating via Slack or Amazon
+   Chime. These styles control the layout and appearance of those
+   buttons and their container.
+*/
+.communication-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+/* Base style for any communication button */
+.comm-btn {
+    padding: 0.5rem 0.8rem;
+    font-size: 0.9rem;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    color: var(--text-light);
+}
+
+/* Slack button uses the Slack brand colour */
+.slack-btn {
+    background-color: var(--slack-purple);
+}
+
+/* Amazon Chime button uses a brand-themed blue */
+.chime-btn {
+    background-color: var(--chime-blue);
+}
+
+/* Slight opacity change on hover for all comm buttons */
+.comm-btn:hover {
+    opacity: 0.9;
+}
 
 
 /* Action Buttons */
