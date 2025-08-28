@@ -92,6 +92,21 @@ body {
     filter: invert(1) brightness(1.5); /* Make logo white for dark theme */
 }
 
+/* Specific logo for the DAP8 station. Placed below the Amazon logo on the DAP8
+   station page. We size it larger and remove inversion so the colours are
+   displayed as provided. */
+.dap8-logo {
+    /* Enlarged height for the DAP8 bee logo as requested */
+    height: 300px;
+    width: auto;
+    display: block;
+    margin: 0.5rem auto 0;
+    filter: none;
+}
+body.light-mode .dap8-logo {
+    filter: none;
+}
+
 .site-footer {
     padding: 1.5rem;
     text-align: center;
@@ -662,3 +677,523 @@ body {
     .admin-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 768px) { .content-wrapper { padding: 1rem; } .station-page-wrapper { padding: 1rem; } .admin-button-link { top: 1rem; right: 1rem; } .tab-nav { font-size: 0.8rem; flex-wrap: wrap; } .tab-link { padding: 0.8rem 0.5rem; } }
+
+/*
+    =============================================================
+    CUSTOM ADDITIONS
+    =============================================================
+    The styles below add a number of enhancements requested by the
+    project owner: a theme toggle button, notification pop‑ups for
+    login/logout, improved edit and delete buttons in the admin
+    dashboard, Slack and Chime button icons, and a light mode
+    override. Adding these at the end of the file ensures they
+    override earlier definitions when necessary.
+*/
+
+/* Position and style the theme toggle. It sits below the primary
+   header buttons and inherits the dark theme colouring by default. */
+#theme-toggle-btn {
+    position: absolute;
+    top: 4.5rem;
+    right: 2rem;
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    background-color: #495057;
+    color: var(--text-light);
+    transition: background-color 0.3s ease, transform 0.2s ease;
+}
+#theme-toggle-btn:hover {
+    background-color: #6c757d;
+    transform: translateY(-2px);
+}
+
+/* Notification pop‑ups appear fixed in the bottom right corner and
+   fade out automatically via script.js. They blend with the dark
+   theme by default. */
+.notification {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    z-index: 1000;
+    background-color: #495057;
+    color: var(--text-light);
+    padding: 1rem 1.5rem;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    font-size: 0.9rem;
+    display: none;
+}
+
+/* Edit and delete buttons within the admin accounts table */
+.edit-btn, .delete-btn {
+    padding: 0.4rem 0.8rem;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.2s ease;
+}
+.edit-btn {
+    background-color: var(--info-blue);
+    color: var(--text-light);
+}
+.edit-btn:hover {
+    background-color: #2779bd;
+    transform: translateY(-2px);
+}
+.delete-btn {
+    background-color: var(--danger-red);
+    color: var(--text-light);
+    margin-left: 0.4rem;
+}
+.delete-btn:hover {
+    background-color: var(--danger-red-hover);
+    transform: translateY(-2px);
+}
+
+/* Enhanced Slack and Chime buttons with inline icons */
+.comm-btn.slack-btn,
+.comm-btn.chime-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.8rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    border-radius: 6px;
+    border: none;
+    color: #fff;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+.comm-btn.slack-btn {
+    background-color: var(--slack-purple);
+}
+.comm-btn.chime-btn {
+    background-color: var(--chime-blue);
+}
+.comm-btn.slack-btn:hover,
+.comm-btn.chime-btn:hover {
+    transform: translateY(-2px);
+}
+.comm-btn.slack-btn::before,
+.comm-btn.chime-btn::before {
+    content: '';
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    background-size: contain;
+    background-repeat: no-repeat;
+}
+.comm-btn.slack-btn::before {
+    background-image: url('slack-logo.png');
+}
+.comm-btn.chime-btn::before {
+    background-image: url('chime-logo.svg');
+}
+
+/* Hide the button text and enlarge the icons for Slack and Chime so the
+   communication buttons display only the logo at a larger size. The
+   user-provided assets are embedded via the pseudo-elements defined above.
+   The font-size reset hides the original text label. */
+.comm-btn.slack-btn,
+.comm-btn.chime-btn {
+    font-size: 0;
+    padding: 0.4rem; /* reduce padding so the larger icon fills the button */
+}
+.comm-btn.slack-btn::before,
+.comm-btn.chime-btn::before {
+    width: 32px;
+    height: 32px;
+}
+
+/* Remove coloured backgrounds from Slack and Chime buttons and
+   enlarge their icons. This makes the communication controls display
+   purely as icons rather than coloured rectangles. */
+.comm-btn.slack-btn,
+.comm-btn.chime-btn {
+    background-color: transparent;
+    border: none;
+    padding: 0;
+}
+.comm-btn.slack-btn::before,
+.comm-btn.chime-btn::before {
+    /* Increase the size of the Slack and Chime icons for better visibility */
+    width: 100px;
+    height: 100px;
+}
+
+/* Light mode overrides: switching to light mode changes the overall
+   colour palette to bright backgrounds and dark text. */
+body.light-mode {
+    background-color: var(--background-light);
+    color: var(--text-dark);
+}
+body.light-mode .site-header,
+body.light-mode .site-footer {
+    background-color: var(--background-light);
+    color: var(--text-dark);
+}
+body.light-mode .content-wrapper,
+body.light-mode .station-page-wrapper,
+body.light-mode .tab-pane,
+body.light-mode .country-card,
+body.light-mode .form-container,
+body.light-mode .user-list-container {
+    background-color: rgba(255,255,255,0.9);
+    color: var(--text-dark);
+}
+body.light-mode .country-card:hover {
+    border-color: var(--amazon-orange);
+}
+body.light-mode .admin-button-link,
+body.light-mode #theme-toggle-btn {
+    background-color: #e5e5e5;
+    color: var(--text-dark);
+}
+body.light-mode .admin-button-link:hover,
+body.light-mode #theme-toggle-btn:hover {
+    background-color: #cccccc;
+}
+body.light-mode .notification {
+    background-color: #e5e5e5;
+    color: var(--text-dark);
+    box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+}
+body.light-mode .amazon-logo {
+    filter: none;
+}
+body.light-mode .edit-btn {
+    background-color: #3498DB;
+    color: #fff;
+}
+body.light-mode .edit-btn:hover {
+    background-color: #2779bd;
+}
+body.light-mode .delete-btn {
+    background-color: #D9534F;
+}
+body.light-mode .delete-btn:hover {
+    background-color: #C9302C;
+}
+
+/* Additional light mode overrides to improve readability on every page.
+   These rules adjust the backgrounds and text colours of forms, tables,
+   navigation tabs and panels so that the dark-on-light contrast remains
+   strong when light mode is active. */
+body.light-mode .station-page-wrapper,
+body.light-mode .content-wrapper,
+body.light-mode .tab-pane {
+    background-color: #ffffff;
+    color: var(--text-dark);
+    border-color: #dddddd;
+}
+body.light-mode .tab-nav {
+    border-bottom-color: #dddddd;
+}
+body.light-mode .tab-link {
+    color: #555555;
+}
+body.light-mode .tab-link.active {
+    color: var(--amazon-orange);
+    border-bottom-color: var(--amazon-orange);
+}
+body.light-mode .wave-buttons,
+body.light-mode .wave-stats,
+body.light-mode .roster-form,
+body.light-mode .form-container,
+body.light-mode .stat-card,
+body.light-mode .wave-stats {
+    background-color: #f9f9f9;
+    color: var(--text-dark);
+    border-color: #dddddd;
+}
+body.light-mode .wave-stats h4,
+body.light-mode .roster-form h4,
+body.light-mode .form-field label {
+    color: var(--text-dark);
+}
+body.light-mode .form-field input,
+body.light-mode .form-field select,
+body.light-mode .form-field textarea {
+    background-color: #f7f7f7;
+    color: var(--text-dark);
+    border: 1px solid #cccccc;
+}
+body.light-mode table,
+body.light-mode .roster-table {
+    background-color: #ffffff;
+    color: var(--text-dark);
+    border-color: #dddddd;
+}
+body.light-mode table th,
+body.light-mode table td {
+    border-color: #dddddd;
+}
+body.light-mode table tbody tr:nth-child(even) {
+    background-color: #f2f2f2;
+}
+body.light-mode table tbody tr:nth-child(odd) {
+    background-color: #ffffff;
+}
+body.light-mode .company-card,
+body.light-mode .country-card,
+body.light-mode .country-card:hover {
+    background-color: #f9f9f9;
+    color: var(--text-dark);
+    border-color: #dddddd;
+}
+body.light-mode .list-group-item {
+    background-color: #f9f9f9;
+    color: var(--text-dark);
+    border-color: #dddddd;
+}
+body.light-mode input[type='text'],
+body.light-mode input[type='number'],
+body.light-mode input[type='time'],
+body.light-mode input[type='date'],
+body.light-mode select {
+    background-color: #f7f7f7;
+    color: var(--text-dark);
+    border: 1px solid #cccccc;
+}
+body.light-mode .table-container {
+    background-color: #ffffff;
+    border: 1px solid #dddddd;
+}
+
+/* Light mode adjustments for the badge scanner interface. The scanning
+   output box becomes white with a subtle border and dark text. */
+body.light-mode #scanner-output {
+    background-color: #ffffff;
+    border: 2px dashed #cccccc;
+    color: var(--text-dark);
+}
+body.light-mode #scanner-output .scan-details strong {
+    color: #555555;
+}
+
+/* Ensure data tables remain readable in light mode and preserve
+   status colour bands for the roster table. */
+body.light-mode .data-table thead th {
+    background-color: #f2f2f2;
+    color: var(--text-dark);
+    border-color: #dddddd;
+}
+body.light-mode .data-table tr.status-checked-in {
+    background-color: var(--row-color-show);
+    color: var(--text-light);
+}
+body.light-mode .data-table tr.status-awaiting {
+    background-color: var(--row-color-no-show);
+    color: var(--text-light);
+}
+body.light-mode .data-table tr.status-on-rescue {
+    background-color: var(--row-color-rescue);
+    color: var(--text-light);
+}
+body.light-mode .data-table tr.status-no-badge {
+    background-color: var(--row-color-no-badge);
+    color: var(--text-light);
+}
+
+/*
+    =============================================================
+    LIGHT MODE OVERRIDES (REVISED & CORRECTED)
+    =============================================================
+    This single, consolidated block fixes all theme issues including
+    unreadable text, dark spots, and missing roster status colours.
+*/
+body.light-mode {
+    background-color: var(--background-light);
+    background-image: none; /* Remove dark background image for light mode */
+    color: var(--text-dark);
+}
+
+/* General Layout & Page Wrappers */
+body.light-mode .content-wrapper,
+body.light-mode .station-page-wrapper {
+    background-color: rgba(249, 249, 249, 0.9);
+    border: 1px solid #e0e0e0;
+    color: var(--text-dark);
+}
+
+/* Header, Footer & Logo */
+body.light-mode .site-header,
+body.light-mode .site-footer {
+    background-color: var(--background-light);
+    color: var(--text-dark);
+}
+body.light-mode .amazon-logo {
+    filter: none; /* Display the original logo colors */
+}
+body.light-mode .admin-button-link,
+body.light-mode #theme-toggle-btn {
+    background-color: #f0f0f0;
+    color: var(--text-dark);
+    border: 1px solid #ddd;
+}
+body.light-mode .admin-button-link:hover,
+body.light-mode #theme-toggle-btn:hover {
+    background-color: #e5e5e5;
+}
+
+/* Homepage & Station Selectors */
+body.light-mode .greeting-section h1,
+body.light-mode .station-selection-section h1,
+body.light-mode .greeting-section p {
+    color: var(--text-dark);
+}
+body.light-mode .country-card {
+    background-color: #ffffff;
+    color: var(--text-dark);
+    border-color: #e0e0e0;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+/* Station Page: Tabs & Sections */
+body.light-mode .tab-nav {
+    border-bottom-color: #e0e0e0;
+}
+body.light-mode .tab-link {
+    color: #666;
+}
+body.light-mode .tab-link.active,
+body.light-mode .tab-link:hover {
+    color: var(--amazon-orange);
+    border-bottom-color: var(--amazon-orange);
+}
+body.light-mode .roster-actions {
+    background-color: #ffffff;
+    border-color: #e0e0e0;
+}
+
+/* [FIX] Correct Data Table Theming */
+body.light-mode .data-table thead th {
+    background-color: #f2f2f2; /* Light grey for table headers */
+    color: var(--text-dark);
+}
+body.light-mode .data-table th, 
+body.light-mode .data-table td {
+    border-color: #e0e0e0;
+}
+
+/* [FIX] Restore semantic colours for roster status rows in light mode */
+body.light-mode .data-table tr.status-checked-in { background-color: #d4edda; color: #155724; }
+body.light-mode .data-table tr.status-awaiting { background-color: #f8d7da; color: #721c24; }
+body.light-mode .data-table tr.status-on-rescue { background-color: #d1ecf1; color: #0c5460; }
+body.light-mode .data-table tr.status-no-badge { background-color: #e2d9e9; color: #432b51; }
+
+/* Dashboard & Stats */
+body.light-mode .dashboard-extras .company-stats,
+body.light-mode .dashboard-extras .wave-stats,
+body.light-mode .stat-card,
+body.light-mode .company-card {
+    background-color: #ffffff;
+    border-color: #e0e0e0;
+    color: var(--text-dark);
+}
+body.light-mode .stat-card h4,
+body.light-mode .wave-stats h4 {
+    color: #666;
+}
+body.light-mode .wave-btn {
+    background-color: #f0f0f0;
+    color: var(--text-dark);
+    border-color: #ddd;
+}
+body.light-mode .wave-btn.active {
+    background-color: var(--amazon-orange);
+    color: var(--text-dark);
+    border-color: var(--amazon-orange);
+}
+
+/* Modals & Login */
+body.light-mode .modal-content {
+    background-color: #ffffff;
+    color: var(--text-dark);
+    border-color: #e0e0e0;
+}
+body.light-mode .login-card {
+    background-color: #f9f9f9;
+    border-color: #e0e0e0;
+}
+body.light-mode .login-card h3 {
+    color: var(--text-dark);
+}
+body.light-mode .close-button,
+body.light-mode .close-button-missing {
+    color: #888;
+}
+body.light-mode .close-button:hover,
+body.light-mode .close-button-missing:hover {
+    color: #000;
+}
+
+/* Forms & Inputs */
+body.light-mode .form-field label,
+body.light-mode #da-list-content .roster-form h4 {
+    color: var(--text-dark);
+}
+body.light-mode .form-field input,
+body.light-mode .form-field select,
+body.light-mode .roster-form textarea,
+body.light-mode .file-input,
+body.light-mode #station-checklist {
+    background-color: #ffffff;
+    color: var(--text-dark);
+    border-color: #ccc;
+}
+body.light-mode .form-field input:focus,
+body.light-mode .form-field select:focus,
+body.light-mode .roster-form textarea:focus {
+    border-color: var(--amazon-orange);
+    box-shadow: 0 0 0 3px rgba(255, 153, 0, 0.2);
+}
+body.light-mode .file-input::file-selector-button {
+    background-color: #f0f0f0;
+    border-color: var(--amazon-orange);
+    color: var(--amazon-orange);
+}
+body.light-mode .station-checkbox label {
+    background-color: #f0f0f0;
+    border-color: #ccc;
+}
+body.light-mode .station-checkbox input[type="checkbox"]:checked + label {
+    background-color: var(--amazon-orange);
+    color: var(--text-dark);
+    font-weight: 700;
+    border-color: var(--amazon-orange);
+}
+
+/* Admin Page */
+body.light-mode .form-container,
+body.light-mode .user-list-container {
+    background-color: #f9f9f9;
+    border-color: #e0e0e0;
+}
+body.light-mode .edit-btn {
+    background-color: #3498DB;
+    color: #fff;
+}
+body.light-mode .edit-btn:hover {
+    background-color: #2779bd;
+}
+body.light-mode .delete-btn {
+    background-color: #D9534F;
+    color: #fff;
+}
+body.light-mode .delete-btn:hover {
+    background-color: #C9302C;
+}
+
+/* Notifications */
+body.light-mode .notification {
+    background-color: #333;
+    color: #fff;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}

@@ -87,6 +87,11 @@
                 <div class="form-container">
                     <h3>Create New Account</h3>
                     <form id="create-account-form" style="display:flex; flex-direction:column; gap:1rem;">
+                        <!-- Name field for the user -->
+                        <div class="form-field">
+                            <label for="new-name">Name</label>
+                            <input type="text" id="new-name" name="newName" placeholder="User's name…" required>
+                        </div>
                         <div class="form-field">
                             <label for="new-email">Email</label>
                             <input type="email" id="new-email" name="newEmail" placeholder="User's email…" required>
@@ -127,7 +132,7 @@
                     <h3>Existing Accounts</h3>
                     <table class="data-table" id="accounts-table">
                         <thead>
-                            <tr><th>Email</th><th>Badge ID</th><th>Role</th><th>Stations</th><th>Actions</th></tr>
+                            <tr><th>Name</th><th>Email</th><th>Badge ID</th><th>Role</th><th>Stations</th><th>Actions</th></tr>
                         </thead>
                         <tbody></tbody>
                     </table>
@@ -154,7 +159,7 @@
     <script type="module">
         // Import Firebase services for authentication and Firestore
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
-import { getFirestore, collection, getDocs, addDoc, updateDoc, doc, query, orderBy } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+        import { getFirestore, collection, getDocs, addDoc, updateDoc, doc, deleteDoc, query, orderBy } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
         // Predefined demo credentials (you can replace with real authentication logic)
         const demoCredentials = {
@@ -240,6 +245,8 @@ import { getFirestore, collection, getDocs, addDoc, updateDoc, doc, query, order
         let createdAccounts = [];
         // Keep track of which account is currently being edited (null if creating new)
         let editingAccountId = null;
+        // Define desired order of roles for sorting (Developer first, then L4+, L3, L1)
+        const roleOrder = ['Developer', 'L4+', 'L3', 'L1'];
 
         /**
          * Load existing accounts from Firestore into the page. This function
@@ -248,14 +255,27 @@ import { getFirestore, collection, getDocs, addDoc, updateDoc, doc, query, order
          * includes an Edit button that allows modifying the account details.
          */
         async function loadAccounts() {
+            createdAccounts = [];
+            accountsTableBody.innerHTML = '';
             try {
                 const snapshot = await getDocs(accountsCollectionRef);
+                // Collect accounts into an array
+                const accArr = [];
                 snapshot.forEach(docSnap => {
                     const data = docSnap.data();
-                    const acc = { id: docSnap.id, ...data };
+                    accArr.push({ id: docSnap.id, ...data });
+                });
+                // Sort by role using the predefined order
+                accArr.sort((a, b) => {
+                    const ia = roleOrder.indexOf(a.role || '');
+                    const ib = roleOrder.indexOf(b.role || '');
+                    return ia - ib;
+                });
+                // Populate table and internal array
+                accArr.forEach(acc => {
                     createdAccounts.push(acc);
                     const row = document.createElement('tr');
-                    row.innerHTML = `<td>${acc.email || ''}</td><td>${acc.badgeId || ''}</td><td>${acc.role || ''}</td><td>${(acc.stations || []).join(', ') || 'None'}</td><td><button class="edit-btn" data-id="${acc.id}">Edit</button></td>`;
+                    row.innerHTML = `<td>${acc.name || ''}</td><td>${acc.email || ''}</td><td>${acc.badgeId || ''}</td><td>${acc.role || ''}</td><td>${(acc.stations || []).join(', ') || 'None'}</td><td><button class="edit-btn" data-id="${acc.id}">Edit</button><button class="delete-btn" data-id="${acc.id}">Delete</button></td>`;
                     accountsTableBody.appendChild(row);
                 });
             } catch (error) {
@@ -396,6 +416,7 @@ import { getFirestore, collection, getDocs, addDoc, updateDoc, doc, query, order
 
         createAccountForm.addEventListener('submit', async event => {
             event.preventDefault();
+            const name = document.getElementById('new-name').value.trim();
             const email = document.getElementById('new-email').value.trim();
             const password = document.getElementById('new-password').value.trim();
             const confirmPassword = document.getElementById('confirm-password').value.trim();
@@ -403,7 +424,7 @@ import { getFirestore, collection, getDocs, addDoc, updateDoc, doc, query, order
             const role = document.getElementById('new-role').value;
             const selectedStations = Array.from(document.querySelectorAll('#station-checklist input[type="checkbox"]:checked')).map(chk => chk.value);
             // Simple validation: all fields filled and passwords match
-            if (!email || !password || password !== confirmPassword || !badgeId || !role) {
+            if (!name || !email || !password || password !== confirmPassword || !badgeId || !role) {
                 createAccountMessage.textContent = 'Please ensure the passwords match and all fields are filled.';
                 createAccountMessage.style.display = 'block';
                 return;
@@ -419,20 +440,14 @@ import { getFirestore, collection, getDocs, addDoc, updateDoc, doc, query, order
                 try {
                     // Update in Firestore
                     const accountDocRef = doc(accountsCollectionRef, editingAccountId);
-                    await updateDoc(accountDocRef, { email, password, badgeId, role, stations: selectedStations });
+                    await updateDoc(accountDocRef, { name, email, password, badgeId, role, stations: selectedStations });
                     // Update in-memory array
                     const idx = createdAccounts.findIndex(acc => acc.id === editingAccountId);
                     if (idx > -1) {
-                        createdAccounts[idx] = { id: editingAccountId, email, password, badgeId, role, stations: selectedStations };
+                        createdAccounts[idx] = { id: editingAccountId, name, email, password, badgeId, role, stations: selectedStations };
                     }
-                    // Update corresponding row in the table
-                    const targetRow = Array.from(accountsTableBody.querySelectorAll('tr')).find(tr => {
-                        const editBtn = tr.querySelector('button.edit-btn');
-                        return editBtn && editBtn.dataset.id === editingAccountId;
-                    });
-                    if (targetRow) {
-                        targetRow.innerHTML = `<td>${email}</td><td>${badgeId}</td><td>${role}</td><td>${selectedStations.join(', ') || 'None'}</td><td><button class="edit-btn" data-id="${editingAccountId}">Edit</button></td>`;
-                    }
+                    // Refresh accounts list to maintain sorting and actions
+                    await loadAccounts();
                     // Log account update
                     addLogAdmin('updateAccount', `Updated account ${email} (role: ${role})`, null);
                     // Reload logs to reflect the update
@@ -449,13 +464,11 @@ import { getFirestore, collection, getDocs, addDoc, updateDoc, doc, query, order
             } else {
                 // Create new account
                 try {
-                    const docRef = await addDoc(accountsCollectionRef, { email, password, badgeId, role, stations: selectedStations });
-                    const newAccount = { id: docRef.id, email, password, badgeId, role, stations: selectedStations };
+                    const docRef = await addDoc(accountsCollectionRef, { name, email, password, badgeId, role, stations: selectedStations });
+                    const newAccount = { id: docRef.id, name, email, password, badgeId, role, stations: selectedStations };
                     createdAccounts.push(newAccount);
-                    // Add row with edit button
-                    const row = document.createElement('tr');
-                    row.innerHTML = `<td>${email}</td><td>${badgeId}</td><td>${role}</td><td>${selectedStations.join(', ') || 'None'}</td><td><button class="edit-btn" data-id="${docRef.id}">Edit</button></td>`;
-                    accountsTableBody.appendChild(row);
+                    // Refresh accounts list to maintain sorting and include delete button
+                    await loadAccounts();
                     // Log new account creation
                     addLogAdmin('createAccount', `Created account ${email} (role: ${role})`, null);
                     // Reload logs to reflect the new entry
@@ -480,13 +493,35 @@ import { getFirestore, collection, getDocs, addDoc, updateDoc, doc, query, order
          * indicate an update action. Editing state is tracked via
          * editingAccountId.
          */
-        accountsTableBody.addEventListener('click', event => {
+        accountsTableBody.addEventListener('click', async event => {
             const target = event.target;
+            // Handle delete button click
+            if (target && target.classList.contains('delete-btn')) {
+                const accId = target.dataset.id;
+                const account = createdAccounts.find(acc => acc.id === accId);
+                if (!account) return;
+                const confirmDelete = confirm(`Delete account ${account.email}? This action cannot be undone.`);
+                if (!confirmDelete) return;
+                try {
+                    await deleteDoc(doc(accountsCollectionRef, accId));
+                    // Remove from local array
+                    createdAccounts = createdAccounts.filter(acc => acc.id !== accId);
+                    // Refresh accounts list and logs
+                    await loadAccounts();
+                    addLogAdmin('deleteAccount', `Deleted account ${account.email} (role: ${account.role})`, null);
+                    loadLogs();
+                } catch (err) {
+                    console.error('Error deleting account:', err);
+                }
+                return;
+            }
+            // Handle edit button click
             if (target && target.classList.contains('edit-btn')) {
                 const accId = target.dataset.id;
                 const account = createdAccounts.find(acc => acc.id === accId);
                 if (!account) return;
                 // Populate the form with the existing account values
+                document.getElementById('new-name').value = account.name || '';
                 document.getElementById('new-email').value = account.email || '';
                 document.getElementById('new-password').value = account.password || '';
                 document.getElementById('confirm-password').value = account.password || '';
@@ -505,6 +540,36 @@ import { getFirestore, collection, getDocs, addDoc, updateDoc, doc, query, order
                 window.scrollTo({ top: createAccountForm.offsetTop - 50, behavior: 'smooth' });
             }
         });
+
+        // ------------------------------------------------------------------
+        // THEME TOGGLE FOR ADMIN PAGE
+        // ------------------------------------------------------------------
+        // On the admin page we need to add the theme toggle button because
+        // script.js is not loaded here. This self‑invoking function inserts
+        // a button into the header that toggles the 'light-mode' class
+        // on the body and stores the preference in localStorage. It avoids
+        // duplicate buttons if called multiple times.
+        (function() {
+            const header = document.querySelector('.site-header');
+            if (!header) return;
+            // Prevent multiple toggles
+            if (document.getElementById('theme-toggle-btn')) return;
+            // Apply previously saved theme
+            const savedTheme = localStorage.getItem('theme');
+            if (savedTheme === 'light') {
+                document.body.classList.add('light-mode');
+            }
+            const btn = document.createElement('button');
+            btn.id = 'theme-toggle-btn';
+            btn.className = 'admin-button-link';
+            btn.textContent = document.body.classList.contains('light-mode') ? 'Dark Mode' : 'Light Mode';
+            btn.addEventListener('click', () => {
+                const isLight = document.body.classList.toggle('light-mode');
+                localStorage.setItem('theme', isLight ? 'light' : 'dark');
+                btn.textContent = isLight ? 'Dark Mode' : 'Light Mode';
+            });
+            header.appendChild(btn);
+        })();
     </script>
 </body>
 </html>

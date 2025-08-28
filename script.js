@@ -86,7 +86,9 @@ const demoCredentials = {
     email: 'admin@example.com',
     password: 'admin123',
     badge: '12345',
-    role: 'Developer'
+    role: 'Developer',
+    // Provide a name for the demo account so greeting messages have a fallback
+    name: 'Demo User'
 };
 
 /**
@@ -123,10 +125,10 @@ async function loadAccounts() {
 function authenticateAccount(email, password, badge) {
     // Check demo credentials (email/password or badge)
     if (email && password && email === demoCredentials.email && password === demoCredentials.password) {
-        return { email: demoCredentials.email, role: demoCredentials.role, stations: [] };
+        return { email: demoCredentials.email, role: demoCredentials.role, stations: [], name: demoCredentials.name };
     }
     if (badge && badge === demoCredentials.badge) {
-        return { badgeId: demoCredentials.badge, role: demoCredentials.role, stations: [] };
+        return { badgeId: demoCredentials.badge, role: demoCredentials.role, stations: [], name: demoCredentials.name };
     }
     // Check loaded accounts array
     for (const acc of allAccounts) {
@@ -163,12 +165,85 @@ function updateHeaderUI() {
             logoutBtn.style.display = 'none';
         }
     }
+
+    // Show or hide the Admin link(s) based on role. Only Developer, L4+ and L3
+    // roles may access the admin panel. If no user is logged in, hide the button.
+    const adminLinks = document.querySelectorAll('.admin-button-link[href*="admin"], #adminBtn');
+    adminLinks.forEach(link => {
+        if (user && ['Developer','L4+','L3'].includes(user.role)) {
+            link.style.display = 'inline-block';
+        } else {
+            link.style.display = 'none';
+        }
+    });
+}
+
+/**
+ * Display a temporary notification with the provided message. The notification
+ * element will be created on first use and reused subsequently. A CSS
+ * animation (defined in style.css) handles the fade in/out effect. The
+ * notification automatically disappears after a few seconds.
+ *
+ * @param {string} message - Text to show in the notification.
+ */
+function showNotification(message) {
+    let notif = document.getElementById('notification');
+    if (!notif) {
+        notif = document.createElement('div');
+        notif.id = 'notification';
+        notif.className = 'notification';
+        document.body.appendChild(notif);
+    }
+    notif.textContent = message;
+    notif.style.display = 'block';
+    // Hide after 4 seconds
+    setTimeout(() => {
+        notif.style.display = 'none';
+    }, 4000);
+}
+
+/**
+ * Initialize a dark/light theme toggle button. The button is placed in the
+ * site header and toggles the 'light-mode' class on the body element. The
+ * selected theme is stored in localStorage so it persists across page
+ * reloads. This function guards against adding multiple toggle buttons if
+ * called more than once.
+ */
+function initializeTheme() {
+    const header = document.querySelector('.site-header');
+    if (!header) return;
+    // Avoid duplicate toggle button
+    if (document.getElementById('theme-toggle-btn')) return;
+    // Apply previously saved theme
+    const saved = localStorage.getItem('theme');
+    if (saved === 'light') {
+        document.body.classList.add('light-mode');
+    }
+    const btn = document.createElement('button');
+    btn.id = 'theme-toggle-btn';
+    btn.className = 'admin-button-link';
+    // Position toggle somewhere between admin and login buttons
+    btn.style.right = '5rem';
+    btn.textContent = document.body.classList.contains('light-mode') ? 'Dark Mode' : 'Light Mode';
+    btn.addEventListener('click', () => {
+        const isLight = document.body.classList.toggle('light-mode');
+        localStorage.setItem('theme', isLight ? 'light' : 'dark');
+        btn.textContent = isLight ? 'Dark Mode' : 'Light Mode';
+    });
+    header.appendChild(btn);
 }
 
 // ======================================================================
 // MAIN SCRIPT LOGIC
 // ======================================================================
 document.addEventListener('DOMContentLoaded', function() {
+
+    // Immediately update header and set up the theme toggle. Doing this
+    // before any page-specific logic ensures that the correct buttons
+    // (login/logout/admin) are visible on all pages and the theme is
+    // applied consistently.
+    updateHeaderUI();
+    initializeTheme();
 
     const stationPageWrapper = document.querySelector('.station-page-wrapper');
 
@@ -983,6 +1058,9 @@ function initializeHomePage() {
                 sessionStorage.setItem('currentUser', JSON.stringify(user));
                 updateHeaderUI();
                 closeLoginModal();
+                // Show a friendly welcome message using the user's name if available
+                const displayName = user.name || user.email || user.badgeId || 'User';
+                showNotification(`Welcome back ${displayName}.`);
                 // Log successful login via email/password
                 addLog('login', `User ${user.email || user.badgeId || ''} logged in via email/password`, null);
             } else {
@@ -1005,6 +1083,8 @@ function initializeHomePage() {
                 sessionStorage.setItem('currentUser', JSON.stringify(user));
                 updateHeaderUI();
                 closeLoginModal();
+                const displayName = user.name || user.email || user.badgeId || 'User';
+                showNotification(`Welcome back ${displayName}.`);
                 // Log successful login via badge scan
                 addLog('login', `User ${user.email || user.badgeId || ''} logged in via badge`, null);
             } else {
@@ -1022,6 +1102,8 @@ function initializeHomePage() {
             const currentUserData = sessionStorage.getItem('currentUser');
             sessionStorage.removeItem('currentUser');
             updateHeaderUI();
+            // Display logout notification
+            showNotification('You have been logged out.');
             // Log logout event
             if (currentUserData) {
                 const u = JSON.parse(currentUserData);
