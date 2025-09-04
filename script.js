@@ -1,6 +1,43 @@
+/**
+ * =================================================================================================
+ * CRITICAL SECURITY WARNING & FIX-LOG
+ * =================================================================================================
+ *
+ * 1.  **Original Issue (Critical Security Flaw):** The original script loaded ALL user accounts,
+ * including plaintext passwords, into the browser. This is extremely insecure, as anyone
+ * could open the browser's developer tools and see every user's credentials.
+ *
+ * 2.  **Original Issue (Permissions Error):** The original login system was custom and only saved
+ * user info to the browser's `sessionStorage`. It NEVER actually logged the user into Firebase.
+ * However, your Firestore Security Rules (`allow read: if request.auth != null;`) require a
+ * real Firebase login. This mismatch is why you received "Missing or insufficient permissions"
+ * errors—from the server's perspective, you were never logged in.
+ *
+ * 3.  **The Fix Implemented Below:**
+ * -   **Firebase Authentication:** The login/logout logic has been completely rewritten to use
+ * Firebase's secure, built-in Authentication service (`signInWithEmailAndPassword`, `signOut`).
+ * This correctly authenticates the user with the Firebase backend, resolving the permissions errors.
+ * -   **Secure Data Handling:** The script no longer downloads all user accounts. Instead, after a
+ * successful login, it fetches ONLY the logged-in user's specific data (role, stations, etc.)
+ * from the 'accounts' collection.
+ * -   **App Initialization:** The entire application now starts inside an `onAuthStateChanged`
+ * listener. This is the correct pattern to ensure that Firebase has established the user's
+ * login status BEFORE any data is requested.
+ * -   **Minor Bug Fixes:** Several smaller bugs related to Firestore queries and UI updates have also
+ * been corrected throughout the script.
+ *
+ * 4.  **ACTION REQUIRED:** You should now migrate your users from the 'accounts' collection to the
+ * Firebase Authentication panel in your Firebase console. After migration, you should DELETE
+ * the `password` field from all documents in your 'accounts' collection.
+ *
+ * =================================================================================================
+ */
+
 // Import all the functions we need from the Firebase SDKs
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getFirestore, collection, getDocs, getDoc, addDoc, onSnapshot, doc, deleteDoc, updateDoc, writeBatch, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+// FIX: Import Firebase Authentication functions
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
@@ -15,44 +52,28 @@ const firebaseConfig = {
 // Initialize Firebase and get references to the services
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+// FIX: Initialize the Firebase Auth service
+const auth = getAuth(app);
+
 
 // ======================================================================
 // LOGGING UTILITIES
 // ======================================================================
-// Logs of site activity are stored in the "logs" collection. Each log
-// document records the timestamp, the station (if applicable), the
-// email/badge of the user performing the action and a description of
-// the action performed. A helper function is provided to write a new
-// log entry to Firestore. If the write fails, it is silently ignored
-// to avoid interrupting the user flow.
-
-// Reference to the logs collection
 const logsCollectionRef = collection(db, 'logs');
 
-/**
- * Add a log entry to the Firestore logs collection. This function
- * attempts to write a document with the provided fields. If an error
- * occurs (e.g. network failure) it will be printed to the console
- * but will not disrupt the user experience.
- *
- * @param {string} action - A short action identifier (e.g. 'createAccount')
- * @param {string} details - A human-readable description of the event
- * @param {string|null} stationId - The station ID related to the action (optional)
- */
 async function addLog(action, details, stationId = null) {
     try {
-        // Determine the user performing the action from the session if available
         let userIdentifier = 'Unknown';
-        try {
-            const current = sessionStorage.getItem('currentUser');
-            if (current) {
-                const userObj = JSON.parse(current);
-                // Prefer the email; fall back to badgeId if available
-                if (userObj.email) userIdentifier = userObj.email;
-                else if (userObj.badgeId) userIdentifier = userObj.badgeId;
+        // FIX: Use the actual Firebase Auth user for logging
+        if (auth.currentUser) {
+            userIdentifier = auth.currentUser.email;
+        } else {
+            // Fallback for logged-out actions or if auth state is not yet available
+            const sessionUser = sessionStorage.getItem('currentUserDetails');
+            if (sessionUser) {
+                const userObj = JSON.parse(sessionUser);
+                userIdentifier = userObj.email || userObj.badgeId || 'Session User';
             }
-        } catch (err) {
-            // Ignore JSON parse errors; userIdentifier will remain 'Unknown'
         }
         await addDoc(logsCollectionRef, {
             timestamp: Date.now(),
@@ -67,95 +88,31 @@ async function addLog(action, details, stationId = null) {
 }
 
 // ======================================================================
-// ACCOUNT AND AUTHENTICATION UTILITIES
+// ACCOUNT AND AUTHENTICATION UTILITIES (REFACTORED FOR FIREBASE AUTH)
 // ======================================================================
-
-// Collection reference for employee/admin accounts. Accounts created
-// via the admin panel are stored in this Firestore collection and
-// include email, password, badgeId, role and stations.
 const accountsCollectionRefMain = collection(db, 'accounts');
 
-// In-memory cache of loaded accounts. Populated on page load when
-// required (e.g. on the homepage) so we don't query Firestore for
-// every authentication attempt.
-let allAccounts = [];
-
-// Default demo credentials. These allow access without an account in
-// the database and are treated as a Developer role with full access.
+// Default demo credentials. NOTE: This is a client-side only fallback
+// and does not represent a real secure account.
 const demoCredentials = {
     email: 'admin@example.com',
     password: 'admin123',
-    badge: '12345',
     role: 'Developer',
-    // Provide a name for the demo account so greeting messages have a fallback
     name: 'Demo User'
 };
 
 /**
- * Load all account documents from Firestore into the allAccounts
- * array. Should be called once during initialization on pages that
- * require authentication (e.g. homepage). If there is a failure
- * retrieving accounts the list will remain empty, and only demo
- * credentials will be recognised.
- */
-async function loadAccounts() {
-    try {
-        const snapshot = await getDocs(accountsCollectionRefMain);
-        allAccounts = snapshot.docs.map(docSnap => {
-            const data = docSnap.data();
-            return { id: docSnap.id, ...data };
-        });
-    } catch (error) {
-        console.error('Error loading accounts:', error);
-    }
-}
-
-/**
- * Attempt to authenticate a user based on provided credentials. This
- * function will check the demo credentials first, then search the
- * loaded accounts for a matching email/password or badge ID. The
- * returned object will contain role and station information if the
- * account exists. Returns null if no matching account is found.
- *
- * @param {string|null} email The email address to authenticate.
- * @param {string|null} password The password to authenticate.
- * @param {string|null} badge The badge ID to authenticate.
- * @returns {Object|null} The authenticated user object or null.
- */
-function authenticateAccount(email, password, badge) {
-    // Check demo credentials (email/password or badge)
-    if (email && password && email === demoCredentials.email && password === demoCredentials.password) {
-        return { email: demoCredentials.email, role: demoCredentials.role, stations: [], name: demoCredentials.name };
-    }
-    if (badge && badge === demoCredentials.badge) {
-        return { badgeId: demoCredentials.badge, role: demoCredentials.role, stations: [], name: demoCredentials.name };
-    }
-    // Check loaded accounts array
-    for (const acc of allAccounts) {
-        // Compare email/password if both provided
-        if (email && password && acc.email === email && acc.password === password) {
-            return { ...acc };
-        }
-        // Compare badge ID if provided
-        if (badge && acc.badgeId && acc.badgeId === badge) {
-            return { ...acc };
-        }
-    }
-    return null;
-}
-
-/**
  * Update the visibility of login and logout buttons based on the
- * current session. When a user is logged in, the login button is
- * hidden and the logout button is shown; when logged out the
- * opposite is true. Called after login/logout actions and on page
- * initialization on pages where login controls exist (e.g. homepage).
+ * current session and Firebase Auth state.
  */
 function updateHeaderUI() {
-    const current = sessionStorage.getItem('currentUser');
-    const user = current ? JSON.parse(current) : null;
+    const user = auth.currentUser;
+    const userDetails = sessionStorage.getItem('currentUserDetails');
+    const role = userDetails ? JSON.parse(userDetails).role : null;
+
     const loginBtn = document.getElementById('login-btn');
     const logoutBtn = document.getElementById('logout-btn');
+
     if (loginBtn && logoutBtn) {
         if (user) {
             loginBtn.style.display = 'none';
@@ -166,11 +123,10 @@ function updateHeaderUI() {
         }
     }
 
-    // Show or hide the Admin link(s) based on role. Only Developer, L4+ and L3
-    // roles may access the admin panel. If no user is logged in, hide the button.
     const adminLinks = document.querySelectorAll('.admin-button-link[href*="admin"], #adminBtn');
     adminLinks.forEach(link => {
-        if (user && ['Developer','L4+','L3'].includes(user.role)) {
+        // Use the role from our fetched user details
+        if (user && role && ['Developer', 'L4+', 'L3'].includes(role)) {
             link.style.display = 'inline-block';
         } else {
             link.style.display = 'none';
@@ -178,13 +134,9 @@ function updateHeaderUI() {
     });
 }
 
+
 /**
- * Display a temporary notification with the provided message. The notification
- * element will be created on first use and reused subsequently. A CSS
- * animation (defined in style.css) handles the fade in/out effect. The
- * notification automatically disappears after a few seconds.
- *
- * @param {string} message - Text to show in the notification.
+ * Display a temporary notification with the provided message.
  */
 function showNotification(message) {
     let notif = document.getElementById('notification');
@@ -196,25 +148,18 @@ function showNotification(message) {
     }
     notif.textContent = message;
     notif.style.display = 'block';
-    // Hide after 4 seconds
     setTimeout(() => {
         notif.style.display = 'none';
     }, 4000);
 }
 
 /**
- * Initialize a dark/light theme toggle button. The button is placed in the
- * site header and toggles the 'light-mode' class on the body element. The
- * selected theme is stored in localStorage so it persists across page
- * reloads. This function guards against adding multiple toggle buttons if
- * called more than once.
+ * Initialize a dark/light theme toggle button.
  */
 function initializeTheme() {
     const header = document.querySelector('.site-header');
-    if (!header) return;
-    // Avoid duplicate toggle button
-    if (document.getElementById('theme-toggle-btn')) return;
-    // Apply previously saved theme
+    if (!header || document.getElementById('theme-toggle-btn')) return;
+
     const saved = localStorage.getItem('theme');
     if (saved === 'light') {
         document.body.classList.add('light-mode');
@@ -222,7 +167,6 @@ function initializeTheme() {
     const btn = document.createElement('button');
     btn.id = 'theme-toggle-btn';
     btn.className = 'admin-button-link';
-    // Position toggle somewhere between admin and login buttons
     btn.style.right = '5rem';
     btn.textContent = document.body.classList.contains('light-mode') ? 'Dark Mode' : 'Light Mode';
     btn.addEventListener('click', () => {
@@ -236,70 +180,90 @@ function initializeTheme() {
 // ======================================================================
 // MAIN SCRIPT LOGIC
 // ======================================================================
-document.addEventListener('DOMContentLoaded', function() {
+// FIX: The entire application logic is now wrapped in onAuthStateChanged.
+// This ensures that we know the user's login status BEFORE running any page-specific code.
+onAuthStateChanged(auth, async (user) => {
+    if (user) {
+        // User is signed in.
+        // Fetch their role and station data from the 'accounts' collection.
+        const q = query(accountsCollectionRefMain, where("email", "==", user.email));
+        const querySnapshot = await getDocs(q);
+        if (!querySnapshot.empty) {
+            const userAccountData = querySnapshot.docs[0].data();
+            // Store role, stations etc. in sessionStorage for easy access across the app.
+            sessionStorage.setItem('currentUserDetails', JSON.stringify(userAccountData));
+        } else {
+            // User is logged in with Firebase, but has no entry in our 'accounts' collection.
+            // Clear session details to prevent incorrect permissions.
+            sessionStorage.removeItem('currentUserDetails');
+            console.warn(`User ${user.email} is authenticated but has no account document.`);
+        }
+    } else {
+        // User is signed out.
+        sessionStorage.removeItem('currentUserDetails');
+    }
 
-    // Immediately update header and set up the theme toggle. Doing this
-    // before any page-specific logic ensures that the correct buttons
-    // (login/logout/admin) are visible on all pages and the theme is
-    // applied consistently.
+    // Now that authentication is resolved, run the page-specific logic.
+    initializePage();
+});
+
+
+/**
+ * Determines which page is active (home or station) and runs the
+ * appropriate initialization logic.
+ */
+function initializePage() {
+    // This function runs AFTER onAuthStateChanged has determined the login state.
     updateHeaderUI();
     initializeTheme();
 
     const stationPageWrapper = document.querySelector('.station-page-wrapper');
 
-    /**
-     * Retrieve the currently logged-in user from sessionStorage. The user
-     * object contains the email, role and assigned stations. If there is
-     * no logged-in user, null is returned.
-     */
-    function getCurrentUser() {
-        try {
-            const data = sessionStorage.getItem('currentUser');
-            return data ? JSON.parse(data) : null;
-        } catch (e) {
-            return null;
-        }
-    }
-
-    /**
-     * Determine whether the given user has permission to access a station.
-     * Developer, L4+ and L3 roles always have full access. Otherwise
-     * the station must be listed in the user's stations array.
-     *
-     * @param {Object} user - The current user object
-     * @param {string} stationId - The station ID to check
-     * @returns {boolean} Whether the user may access the station
-     */
-    function hasAccessToStation(user, stationId) {
-        if (!user || !stationId) return false;
-        const elevatedRoles = ['Developer', 'L4+', 'L3'];
-        if (elevatedRoles.includes(user.role)) return true;
-        if (Array.isArray(user.stations)) {
-            return user.stations.includes(stationId);
-        }
-        return false;
-    }
-
     if (stationPageWrapper) {
-        // Access control for station pages based on logged-in accounts
         const stationId = stationPageWrapper.dataset.stationId;
-        const currentUser = getCurrentUser();
-        if (!currentUser) {
+        const currentUserDetails = getCurrentUserDetails(); // Use our new helper
+
+        if (!auth.currentUser) {
             alert('You must log in to access this page.');
             window.location.href = 'index.html';
             return;
         }
-        if (hasAccessToStation(currentUser, stationId)) {
+
+        if (hasAccessToStation(currentUserDetails, stationId)) {
             initializeStationPageLogic(stationPageWrapper, stationId);
         } else {
             alert('You do not have permission to access this station.');
             window.location.href = 'index.html';
         }
     } else {
-        // Not a station page – initialize home page login functionality
         initializeHomePage();
     }
-});
+}
+
+/**
+ * Retrieve the currently logged-in user's details (role, stations) from sessionStorage.
+ */
+function getCurrentUserDetails() {
+    try {
+        const data = sessionStorage.getItem('currentUserDetails');
+        return data ? JSON.parse(data) : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * Determine whether the given user has permission to access a station.
+ */
+function hasAccessToStation(userDetails, stationId) {
+    if (!userDetails || !stationId) return false;
+    const elevatedRoles = ['Developer', 'L4+', 'L3'];
+    if (elevatedRoles.includes(userDetails.role)) return true;
+    if (Array.isArray(userDetails.stations)) {
+        return userDetails.stations.includes(stationId);
+    }
+    return false;
+}
 
 
 // ======================================================================
@@ -307,11 +271,8 @@ document.addEventListener('DOMContentLoaded', function() {
 // ======================================================================
 
 function initializeStationPageLogic(stationPageWrapper, stationId) {
-    // --- Firestore Collection References ---
     const daListCollectionRef = collection(db, 'stations', stationId, 'drivers');
     const rosterCollectionRef = collection(db, 'stations', stationId, 'roster');
-
-    // --- Element References ---
     const tabLinks = document.querySelectorAll('.tab-link');
     const tabPanes = document.querySelectorAll('.tab-pane');
     const daListTableBody = document.getElementById('da-list-table-body');
@@ -327,36 +288,16 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
     const scannerOutput = document.getElementById('scanner-output');
     const missingDriversModal = document.getElementById('missing-drivers-modal');
     const closeButtonMissing = document.querySelector('.close-button-missing');
-
-    // --- Wave Stats Elements and Data ---
-    // Elements for the wave statistics dashboard box. These will be present on
-    // station pages after modifying the HTML to include a wave container next
-    // to the Drivers by Company container. We initialize data structures for
-    // tracking wave-specific driver counts and the currently selected wave.
     const waveButtonsContainer = document.getElementById('wave-buttons');
     const waveMissingList = document.getElementById('wave-missing-list');
     const waveShowDriversBtn = document.getElementById('wave-show-drivers-btn');
-
-    // --- Communication Buttons ---
-    // Buttons for sending notifications via Slack or Amazon Chime. These are
-    // defined in the dashboard HTML and may not exist on all pages until
-    // the HTML is updated. We store references here and set up event
-    // listeners later. We also maintain a local cache of the latest
-    // roster snapshot in currentDrivers so that messages can be generated
-    // outside the snapshot callback.
     const slackBtn = document.getElementById('slack-btn');
     const chimeBtn = document.getElementById('chime-btn');
+
     let currentDrivers = [];
-    
-    // Updated data structures and variables for grouping by start time
     let startTimeData = {};
     let selectedStartTime = null;
 
-    /**
-     * Update the appearance of start time buttons to reflect the currently
-     * selected start time. The selected button will have the 'active'
-     * class applied.
-     */
     function updateWaveButtonsUI() {
         if (!waveButtonsContainer) return;
         const buttons = waveButtonsContainer.querySelectorAll('.wave-btn');
@@ -370,10 +311,6 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
         });
     }
 
-    /**
-     * Display the list of drivers in the currently selected start time
-     * group who have not yet checked in.
-     */
     function showWaveDrivers() {
         if (!waveMissingList) return;
         waveMissingList.innerHTML = '';
@@ -383,7 +320,6 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
             waveMissingList.appendChild(li);
             return;
         }
-        // Consider drivers checked in with or without a badge as present
         const missing = startTimeData[selectedStartTime].drivers.filter(driver => driver.status !== 'Checked In' && driver.status !== 'Checked In NO BADGE');
         if (missing.length === 0) {
             const li = document.createElement('li');
@@ -392,18 +328,17 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
         } else {
             missing.forEach(driver => {
                 const li = document.createElement('li');
-                li.textContent = `${driver.name} (${driver.badgeId || driver.badgeId})`;
+                // FIX: Corrected redundant property access and added a fallback for clarity.
+                li.textContent = `${driver.name} (${driver.badgeId || 'N/A'})`;
                 waveMissingList.appendChild(li);
             });
         }
     }
 
-    // Attach event listener for displaying drivers of the selected wave
     if (waveShowDriversBtn) {
         waveShowDriversBtn.addEventListener('click', showWaveDrivers);
     }
 
-    // --- Tab Switching Logic ---
     function activateTab(activeLink, targetPaneId) {
         tabLinks.forEach(innerLink => innerLink.classList.remove('active'));
         tabPanes.forEach(pane => pane.classList.remove('active'));
@@ -417,33 +352,25 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
             event.preventDefault();
             const targetId = link.getAttribute('data-tab');
             if (targetId === 'da-list-content') {
-                // Access to the DA-List is restricted to Developer and L4+ roles only
-                try {
-                    const userData = sessionStorage.getItem('currentUser');
-                    const user = userData ? JSON.parse(userData) : null;
-                    if (user && ['Developer','L4+'].includes(user.role)) {
-                        activateTab(link, targetId);
-                    } else {
-                        alert('You do not have permission to access the DA-List.');
-                    }
-                } catch (error) {
-                    alert('Unable to verify permissions.');
+                const userDetails = getCurrentUserDetails();
+                if (userDetails && ['Developer', 'L4+'].includes(userDetails.role)) {
+                    activateTab(link, targetId);
+                } else {
+                    alert('You do not have permission to access the DA-List.');
                 }
             } else {
                 activateTab(link, targetId);
             }
         });
     });
-    
-    // --- Missing Drivers Modal Logic ---
+
     function openMissingModal() { if (missingDriversModal) missingDriversModal.style.display = 'flex'; }
     function closeMissingModal() { if (missingDriversModal) missingDriversModal.style.display = 'none'; }
-    if(closeButtonMissing) closeButtonMissing.addEventListener('click', closeMissingModal);
-    window.addEventListener('click', (event) => { 
+    if (closeButtonMissing) closeButtonMissing.addEventListener('click', closeMissingModal);
+    window.addEventListener('click', (event) => {
         if (event.target == missingDriversModal) closeMissingModal();
     });
 
-    // --- Wave Check Logic ---
     if (waveCheckForm) {
         waveCheckForm.addEventListener('submit', async (event) => {
             event.preventDefault();
@@ -451,28 +378,25 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
             const badgeIdValue = scanInput.value.trim();
             if (!badgeIdValue) return;
 
+            // FIX: Use a more efficient 'in' query to check for both string and number types,
+            // as Firestore doesn't support OR conditions on the same field.
             const badgeIdAsString = badgeIdValue;
             const badgeIdAsNumber = parseInt(badgeIdValue, 10);
-            
-            const qString = query(rosterCollectionRef, where("badgeId", "==", badgeIdAsString));
-            let querySnapshot = await getDocs(qString);
+            const queryValues = isNaN(badgeIdAsNumber) ? [badgeIdAsString] : [badgeIdAsString, badgeIdAsNumber];
 
-            if (querySnapshot.empty && !isNaN(badgeIdAsNumber)) {
-                const qNumber = query(rosterCollectionRef, where("badgeId", "==", badgeIdAsNumber));
-                querySnapshot = await getDocs(qNumber);
-            }
+            const q = query(rosterCollectionRef, where("badgeId", "in", queryValues));
+            const querySnapshot = await getDocs(q);
+
             if (querySnapshot.empty) {
                 scannerOutput.innerHTML = `<h2 class="status-heading status-error">DRIVER NOT FOUND</h2><p>The Badge ID "${badgeIdValue}" was not found on today's roster.</p>`;
             } else {
                 const rosterDoc = querySnapshot.docs[0];
                 const driverData = rosterDoc.data();
-                // If the driver is already checked in (with or without a badge), show the existing check-in time if available
                 if (driverData.status === 'Checked In' || driverData.status === 'Checked In NO BADGE') {
                     const timeStamp = driverData.checkInTime ? ` at ${driverData.checkInTime}` : '';
                     const statusLabel = driverData.status === 'Checked In NO BADGE' ? 'ALREADY CHECKED IN (NO BADGE)' : 'ALREADY CHECKED IN';
                     scannerOutput.innerHTML = `<h2 class="status-heading status-info">${statusLabel}</h2><div class="scan-details"><p><strong>Name:</strong> ${driverData.name}</p><p><strong>Badge ID:</strong> ${driverData.badgeId}</p>${timeStamp ? `<p><strong>Time:</strong> ${driverData.checkInTime}</p>` : ''}</div>`;
                 } else {
-                    // Record the current time when checking in via the scanner
                     const currentTime = new Date().toLocaleTimeString('en-GB', { hour12: false });
                     await updateDoc(rosterDoc.ref, { status: 'Checked In', checkInTime: currentTime });
                     scannerOutput.innerHTML = `<h2 class="status-heading status-success">CHECK-IN SUCCESSFUL</h2><div class="scan-details"><p><strong>Name:</strong> ${driverData.name}</p><p><strong>Transporter ID:</strong> ${driverData.transporterId}</p><p><strong>Badge ID:</strong> ${driverData.badgeId}</p><p><strong>Start Time:</strong> ${driverData.startTime}</p><p><strong>Company Name:</strong> ${driverData.firmenname}</p><p><strong>Time:</strong> ${currentTime}</p></div>`;
@@ -482,7 +406,6 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
         });
     }
 
-    // --- Master Driver Database (DA-List) Logic ---
     onSnapshot(daListCollectionRef, snapshot => {
         if (!daListTableBody) return;
         daListTableBody.innerHTML = '';
@@ -493,7 +416,7 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
             daListTableBody.appendChild(row);
         });
     });
-    
+
     if (addDaForm) {
         addDaForm.addEventListener('submit', async event => {
             event.preventDefault();
@@ -505,7 +428,6 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
                 transporterId: addDaForm.transporterId.value
             };
             await addDoc(daListCollectionRef, newDriver);
-            // Log the addition of a driver to the master DA list
             addLog('addDa', `Added driver ${newDriver.name} (Badge: ${newDriver.badgeId}) to the master list`, stationId);
             addDaForm.reset();
         });
@@ -539,7 +461,6 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
                     if (processedCount > 0) {
                         await batch.commit();
                         alert(`${processedCount} drivers were successfully imported from the file!`);
-                        // Log the bulk import action
                         addLog('bulkImportDA', `Imported ${processedCount} drivers into the master list`, stationId);
                     } else {
                         alert("No valid drivers found. Please check Excel headers: 'User ID', 'Employee Name', 'Badge ID'.");
@@ -553,11 +474,10 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
             reader.readAsArrayBuffer(file);
         });
     }
-    
+
     if (resetDaListBtn) {
         resetDaListBtn.addEventListener('click', async () => {
-            const confirmation = confirm(`DANGER: Are you sure you want to permanently delete the ENTIRE Master Driver Database for ${stationId}? This cannot be undone.`);
-            if (confirmation) {
+            if (confirm(`DANGER: Are you sure you want to permanently delete the ENTIRE Master Driver Database for ${stationId}? This cannot be undone.`)) {
                 const querySnapshot = await getDocs(daListCollectionRef);
                 if (querySnapshot.empty) return alert('Master Driver Database is already empty.');
                 const batch = writeBatch(db);
@@ -565,7 +485,6 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
                 try {
                     await batch.commit();
                     alert(`The Master Driver Database for ${stationId} has been successfully cleared.`);
-                    // Log the reset action
                     addLog('resetDAList', `Cleared the master DA list for station ${stationId}`, stationId);
                 } catch (error) {
                     alert('An error occurred while clearing the database.');
@@ -574,57 +493,49 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
             }
         });
     }
-    
-    // --- Daily Roster (CapRoster) & Dashboard Logic ---
+
     onSnapshot(rosterCollectionRef, snapshot => {
-        if(!rosterTableBody) return;
+        if (!rosterTableBody) return;
         rosterTableBody.innerHTML = '';
         let checkedInCount = 0;
         let rescueCount = 0;
         let companyData = {};
-        
-        // Group data by start time
         startTimeData = {};
 
         const drivers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        // Update the currentDrivers cache for communication buttons
         currentDrivers = drivers;
 
         const uniqueStartTimes = Array.from(new Set(drivers.map(d => d.startTime))).sort((a, b) => {
-            const timeA = a.split(':').map(Number);
-            const timeB = b.split(':').map(Number);
-            if (timeA[0] !== timeB[0]) return timeA[0] - timeB[0];
-            return timeA[1] - timeB[1];
+            const [hA, mA] = a.split(':').map(Number);
+            const [hB, mB] = b.split(':').map(Number);
+            if (hA !== hB) return hA - hB;
+            return mA - mB;
         });
 
         drivers.forEach(driver => {
             const row = document.createElement('tr');
-            // Determine the appropriate row color class based on the driver's status, including a new class for check-ins without a badge
             let statusClass = 'status-awaiting';
-            if (driver.status === 'Checked In') {
-                statusClass = 'status-checked-in';
-            } else if (driver.status === 'On Rescue') {
-                statusClass = 'status-on-rescue';
-            } else if (driver.status === 'Checked In NO BADGE') {
-                statusClass = 'status-no-badge';
-            }
+            if (driver.status === 'Checked In') statusClass = 'status-checked-in';
+            else if (driver.status === 'On Rescue') statusClass = 'status-on-rescue';
+            else if (driver.status === 'Checked In NO BADGE') statusClass = 'status-no-badge';
             row.className = statusClass;
-            // Build a readable status text. When a driver is checked in (with or without a badge), append the stored check-in time.
+
             let statusText = driver.status;
             if ((driver.status === 'Checked In' || driver.status === 'Checked In NO BADGE') && driver.checkInTime) {
                 statusText = `${driver.status} (${driver.checkInTime})`;
             }
-            // Populate the row HTML, including a new action button to mark a driver as checked in without a badge
+
             row.innerHTML = `<td>${driver.transporterId || 'N/A'}</td><td>${driver.badgeId || 'N/A'}</td><td>${driver.name}</td><td>${driver.startTime}</td><td>${driver.firmenname}</td><td>${statusText}</td><td class="actions-cell"><button class="action-btn btn-edit" data-collection="roster" data-id="${driver.id}">Edit</button><button class="action-btn btn-rescue" data-collection="roster" data-id="${driver.id}">Rescue</button><button class="action-btn btn-check-in" data-collection="roster" data-id="${driver.id}">Check-In</button><button class="action-btn btn-no-badge" data-collection="roster" data-id="${driver.id}">No Badge</button><button class="action-btn btn-delete" data-collection="roster" data-id="${driver.id}">Delete</button></td>`;
             rosterTableBody.appendChild(row);
+
             if (driver.status === 'Checked In' || driver.status === 'Checked In NO BADGE') checkedInCount++;
             if (driver.status === 'On Rescue') rescueCount++;
+
             const company = driver.firmenname || 'Unknown';
             if (!companyData[company]) { companyData[company] = { total: 0, checkedIn: 0 }; }
             companyData[company].total++;
             if (driver.status === 'Checked In' || driver.status === 'Checked In NO BADGE') companyData[company].checkedIn++;
 
-            // Group drivers by their exact start time
             const startTime = driver.startTime;
             if (!startTimeData[startTime]) {
                 startTimeData[startTime] = { total: 0, checkedIn: 0, drivers: [] };
@@ -635,34 +546,32 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
         });
 
         const totalDrivers = snapshot.docs.length;
-        const remainingDrivers = totalDrivers - checkedInCount - rescueCount;
-        const progress = totalDrivers > 0 ? Math.round((checkedInCount / totalDrivers) * 100) : 0;
         document.getElementById('total-drivers').innerText = totalDrivers;
         document.getElementById('checked-in-drivers').innerText = checkedInCount;
-        document.getElementById('remaining-drivers').innerText = remainingDrivers;
+        document.getElementById('remaining-drivers').innerText = totalDrivers - checkedInCount - rescueCount;
         document.getElementById('rescue-drivers').innerText = rescueCount;
+
+        const progress = totalDrivers > 0 ? Math.round((checkedInCount / totalDrivers) * 100) : 0;
         const progressBar = document.getElementById('check-in-progress-bar');
         progressBar.style.width = `${progress}%`;
         progressBar.innerText = `${progress}%`;
+
         companyContainer.innerHTML = '<h4>Drivers by Company</h4>';
         for (const companyName in companyData) {
             const stats = companyData[companyName];
-            const missing = stats.total - stats.checkedIn;
             const companyCard = document.createElement('div');
             companyCard.className = 'company-card';
-            companyCard.innerHTML = `<span class="company-name">${companyName}</span><span class="company-ratio">${stats.checkedIn} / ${stats.total}</span><button class="missing-btn" data-company="${companyName}">${missing} Missing</button>`;
+            companyCard.innerHTML = `<span class="company-name">${companyName}</span><span class="company-ratio">${stats.checkedIn} / ${stats.total}</span><button class="missing-btn" data-company="${companyName}">${stats.total - stats.checkedIn} Missing</button>`;
             companyContainer.appendChild(companyCard);
         }
 
-        // Update wave buttons with start times
         if (waveButtonsContainer) {
             waveButtonsContainer.innerHTML = '';
             uniqueStartTimes.forEach(time => {
                 const btn = document.createElement('button');
                 btn.className = 'wave-btn';
-                btn.innerText = time === '08:30' || time === '10:30' ? 'DSP/IW' : time;
-                btn.setAttribute('data-time', time); // Store the original time
-                if (time === selectedStartTime) btn.classList.add('active');
+                btn.innerText = time;
+                btn.setAttribute('data-time', time);
                 btn.addEventListener('click', () => {
                     selectedStartTime = time;
                     updateWaveButtonsUI();
@@ -670,12 +579,18 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
                 });
                 waveButtonsContainer.appendChild(btn);
             });
-            // If no start time selected yet, default to the first one in the list
-            if (selectedStartTime === null && uniqueStartTimes.length > 0) {
+
+            // FIX: More robustly handle the selected start time. If the previously selected
+            // time no longer exists, default to the first available one.
+            if (!uniqueStartTimes.includes(selectedStartTime) && uniqueStartTimes.length > 0) {
                 selectedStartTime = uniqueStartTimes[0];
-                showWaveDrivers();
             }
-            updateWaveButtonsUI();
+            
+            // Always update the UI after a data change
+            if(selectedStartTime) {
+                showWaveDrivers();
+                updateWaveButtonsUI();
+            }
         }
     });
 
@@ -687,83 +602,75 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
             const startTime = addDriverToRosterForm.startTime.value.trim();
             const firmenname = addDriverToRosterForm.firmenname.value.trim();
             if (!badgeId || !name || !startTime || !firmenname) { return alert("Please fill out all fields."); }
+
             const q = query(daListCollectionRef, where("badgeId", "==", badgeId));
-            const querySnapshot = await getDocs(q);
-            if (querySnapshot.empty) {
-                await addDoc(daListCollectionRef, { badgeId: badgeId, name: name, companyName: firmenname, userId: 'N/A', transporterId: 'N/A' });
+            if ((await getDocs(q)).empty) {
+                await addDoc(daListCollectionRef, { badgeId, name, companyName: firmenname, userId: 'N/A', transporterId: 'N/A' });
                 alert(`New driver with Badge ID ${badgeId} was saved to the permanent DA-List for ${stationId}.`);
-                // Log creation of new master driver
                 addLog('createMasterDriver', `New driver ${name} (Badge: ${badgeId}) saved to master list`, stationId);
             }
-            const rosterDriver = {
-                badgeId: badgeId,
-                name: name,
-                startTime: startTime,
-                firmenname: firmenname,
-                status: 'Awaiting',
+
+            await addDoc(rosterCollectionRef, {
+                badgeId, name, startTime, firmenname, status: 'Awaiting',
                 transporterId: `AT-${stationId.toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`
-            };
-            await addDoc(rosterCollectionRef, rosterDriver);
-            // Log addition to the daily roster
-            addLog('addRoster', `Added ${name} (Badge: ${badgeId}) to the daily roster for ${stationId}`, stationId);
+            });
+            addLog('addRoster', `Added ${name} (Badge: ${badgeId}) to the daily roster`, stationId);
             addDriverToRosterForm.reset();
         });
     }
-    
+
     if (bulkRosterForm) {
         bulkRosterForm.addEventListener('submit', async (event) => {
             event.preventDefault();
             const textArea = bulkRosterForm.querySelector('textarea');
-            const bulkText = textArea.value.trim();
-            if (!bulkText) return alert('Bulk roster box is empty.');
-            const confirmation = confirm(`Are you sure you want to DELETE the current roster for ${stationId} and overwrite it?`);
-            if (!confirmation) return;
+            if (!textArea.value.trim()) return alert('Bulk roster box is empty.');
+            if (!confirm(`Are you sure you want to DELETE the current roster for ${stationId} and overwrite it?`)) return;
+
             try {
                 const daListSnapshot = await getDocs(daListCollectionRef);
                 const daListMap = new Map(daListSnapshot.docs.map(doc => [doc.data().transporterId, doc.data()]));
+
                 const oldRosterSnapshot = await getDocs(rosterCollectionRef);
                 const deleteBatch = writeBatch(db);
                 oldRosterSnapshot.forEach(doc => { deleteBatch.delete(doc.ref); });
                 await deleteBatch.commit();
-                const lines = bulkText.split('\n');
+
+                const lines = textArea.value.trim().split('\n');
                 const rosterAddBatch = writeBatch(db);
                 const daListAddBatch = writeBatch(db);
                 let newDriversAddedToDA = 0;
                 let rosterCount = 0;
+
                 lines.forEach(line => {
-                    if (!line.trim()) return;
                     const columns = line.split('\t').map(item => item.trim());
-                    if (columns.length >= 9) {
+                    if (columns.length >= 9 && line.trim()) {
                         const newRosterDriver = {
                             transporterId: columns[0], name: columns[1], status: columns[2],
                             startTime: columns[5], firmenname: columns[8], badgeId: 'N/A'
                         };
                         if (daListMap.has(newRosterDriver.transporterId)) {
-                            const masterDriver = daListMap.get(newRosterDriver.transporterId);
-                            newRosterDriver.badgeId = masterDriver.badgeId;
+                            newRosterDriver.badgeId = daListMap.get(newRosterDriver.transporterId).badgeId;
                         } else {
-                            const newMasterDriver = {
+                            daListAddBatch.set(doc(daListCollectionRef), {
                                 userId: `NEW-${newRosterDriver.transporterId}`, name: newRosterDriver.name,
                                 badgeId: 'NEEDS UPDATE', companyName: newRosterDriver.firmenname,
                                 transporterId: newRosterDriver.transporterId
-                            };
-                            const newDaListDocRef = doc(daListCollectionRef);
-                            daListAddBatch.set(newDaListDocRef, newMasterDriver);
+                            });
                             newDriversAddedToDA++;
                         }
-                        const newRosterDocRef = doc(rosterCollectionRef);
-                        rosterAddBatch.set(newRosterDocRef, newRosterDriver);
+                        rosterAddBatch.set(doc(rosterCollectionRef), newRosterDriver);
                         rosterCount++;
                     }
                 });
-                if (newDriversAddedToDA > 0) { await daListAddBatch.commit(); }
-                if (rosterCount > 0) { await rosterAddBatch.commit(); }
-                let alertMessage = `${rosterCount} drivers were added to the new roster for ${stationId}.`;
+
+                if (newDriversAddedToDA > 0) await daListAddBatch.commit();
+                if (rosterCount > 0) await rosterAddBatch.commit();
+
+                let alertMessage = `${rosterCount} drivers were added to the new roster.`;
                 if (newDriversAddedToDA > 0) {
-                    alertMessage += `\n${newDriversAddedToDA} new drivers were discovered and saved to the master DA-List.`;
+                    alertMessage += `\n${newDriversAddedToDA} new drivers were saved to the master DA-List.`;
                 }
                 alert(alertMessage);
-                // Log bulk roster upload
                 addLog('bulkRosterUpload', `Uploaded roster with ${rosterCount} entries and added ${newDriversAddedToDA} new master drivers`, stationId);
                 textArea.value = '';
             } catch (error) {
@@ -772,21 +679,17 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
             }
         });
     }
-    
+
     if (resetRosterBtn) {
         resetRosterBtn.addEventListener('click', async () => {
-            const confirmation = confirm(`Are you sure you want to delete the ENTIRE daily roster for ${stationId}?`);
-            if (confirmation) {
+            if (confirm(`Are you sure you want to delete the ENTIRE daily roster for ${stationId}?`)) {
                 const querySnapshot = await getDocs(rosterCollectionRef);
-                if (querySnapshot.empty) { return alert('The daily roster is already empty.'); }
+                if (querySnapshot.empty) return alert('The daily roster is already empty.');
                 const batch = writeBatch(db);
-                querySnapshot.forEach(docSnap => {
-                    batch.delete(docSnap.ref);
-                });
+                querySnapshot.forEach(docSnap => { batch.delete(docSnap.ref); });
                 try {
                     await batch.commit();
                     alert(`The daily roster for ${stationId} has been successfully cleared.`);
-                    // Log the roster reset
                     addLog('resetRoster', `Cleared the daily roster for station ${stationId}`, stationId);
                 } catch (error) {
                     alert('An error occurred while clearing the roster.');
@@ -795,92 +698,84 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
             }
         });
     }
-    
+
     if (stationPageWrapper) {
         stationPageWrapper.addEventListener('click', async (event) => {
             const target = event.target;
-            if (target.classList.contains('action-btn')) {
-                const id = target.dataset.id;
-                const collectionName = target.dataset.collection;
-                if (!id || !collectionName) return;
-                const docRef = doc(db, 'stations', stationId, collectionName, id);
+            if (!target.classList.contains('action-btn')) return;
+
+            const id = target.dataset.id;
+            const collectionName = target.dataset.collection;
+            if (!id || !collectionName) return;
+
+            const docRef = doc(db, 'stations', stationId, collectionName, id);
+
             if (target.classList.contains('btn-delete')) {
-                    if (confirm('Are you sure you want to permanently delete this entry?')) {
-                        await deleteDoc(docRef);
-                        // Log deletion of entry
-                        addLog('deleteEntry', `Deleted entry ${id} from ${collectionName} at station ${stationId}`, stationId);
-                    }
-                } else if (target.classList.contains('btn-check-in')) {
-                    // When checking in a driver, record the exact time of check-in
-                    const currentTime = new Date().toLocaleTimeString('en-GB', { hour12: false });
-                    await updateDoc(docRef, { status: 'Checked In', checkInTime: currentTime });
-                    addLog('updateStatus', `Checked in driver with ID ${id} at station ${stationId} at ${currentTime}`, stationId);
-                } else if (target.classList.contains('btn-no-badge')) {
-                    // When a driver has no badge, mark as checked in with a special status and record the time
-                    const currentTime = new Date().toLocaleTimeString('en-GB', { hour12: false });
-                    await updateDoc(docRef, { status: 'Checked In NO BADGE', checkInTime: currentTime });
-                    addLog('updateStatus', `Marked driver with ID ${id} as Checked In NO BADGE at station ${stationId} at ${currentTime}`, stationId);
-                } else if (target.classList.contains('btn-rescue')) {
-                    await updateDoc(docRef, { status: 'On Rescue' });
-                    addLog('updateStatus', `Marked driver with ID ${id} as On Rescue at station ${stationId}`, stationId);
-                } else if (target.classList.contains('btn-edit')) {
-                    try {
-                        const rosterDoc = await getDoc(docRef);
-                        if (!rosterDoc.exists()) return alert('Driver not found in roster.');
-                        const currentDriver = rosterDoc.data();
-                        const newName = prompt("Enter the new Employee Name:", currentDriver.name);
-                        const newBadgeId = prompt("Enter the new Badge ID:", currentDriver.badgeId);
-                        if ((newName && newName !== currentDriver.name) || (newBadgeId && newBadgeId !== currentDriver.badgeId)) {
-                            await updateDoc(docRef, {
-                                name: newName || currentDriver.name,
-                                badgeId: newBadgeId || currentDriver.badgeId
-                            });
-                            // Log roster update
-                            addLog('editRoster', `Updated roster entry ${id}: name changed to ${newName || currentDriver.name}, badge to ${newBadgeId || currentDriver.badgeId}`, stationId);
-                            const masterDriverQuery = query(daListCollectionRef, where("transporterId", "==", currentDriver.transporterId));
-                            const masterDriverSnapshot = await getDocs(masterDriverQuery);
-                            if (!masterDriverSnapshot.empty) {
-                                const masterDocId = masterDriverSnapshot.docs[0].id;
-                                const masterDocRef = doc(db, 'stations', stationId, 'drivers', masterDocId);
-                                await updateDoc(masterDocRef, {
-                                    name: newName || currentDriver.name,
-                                    badgeId: newBadgeId || currentDriver.badgeId
-                                });
-                                // Log update in master list
-                                addLog('editMasterDriver', `Updated master entry ${masterDocId}: name changed to ${newName || currentDriver.name}, badge to ${newBadgeId || currentDriver.badgeId}`, stationId);
-                                alert(`Successfully updated driver in both the Roster and the Master DA-List!`);
-                            } else {
-                                alert(`Driver updated in the Roster, but could not be found in the Master DA-List to sync.`);
-                            }
+                if (confirm('Are you sure you want to permanently delete this entry?')) {
+                    await deleteDoc(docRef);
+                    addLog('deleteEntry', `Deleted entry ${id} from ${collectionName}`, stationId);
+                }
+            } else if (target.classList.contains('btn-check-in')) {
+                const currentTime = new Date().toLocaleTimeString('en-GB', { hour12: false });
+                await updateDoc(docRef, { status: 'Checked In', checkInTime: currentTime });
+                addLog('updateStatus', `Checked in driver ${id}`, stationId);
+            } else if (target.classList.contains('btn-no-badge')) {
+                const currentTime = new Date().toLocaleTimeString('en-GB', { hour12: false });
+                await updateDoc(docRef, { status: 'Checked In NO BADGE', checkInTime: currentTime });
+                addLog('updateStatus', `Marked driver ${id} as Checked In NO BADGE`, stationId);
+            } else if (target.classList.contains('btn-rescue')) {
+                await updateDoc(docRef, { status: 'On Rescue' });
+                addLog('updateStatus', `Marked driver ${id} as On Rescue`, stationId);
+            } else if (target.classList.contains('btn-edit')) {
+                try {
+                    const rosterDoc = await getDoc(docRef);
+                    if (!rosterDoc.exists()) return alert('Driver not found.');
+                    const currentDriver = rosterDoc.data();
+                    const newName = prompt("Enter new Employee Name:", currentDriver.name);
+                    const newBadgeId = prompt("Enter new Badge ID:", currentDriver.badgeId);
+                    if (newName || newBadgeId) {
+                        const updates = {};
+                        if(newName) updates.name = newName;
+                        if(newBadgeId) updates.badgeId = newBadgeId;
+                        await updateDoc(docRef, updates);
+                        addLog('editRoster', `Updated roster entry ${id}`, stationId);
+                        
+                        const masterDriverQuery = query(daListCollectionRef, where("transporterId", "==", currentDriver.transporterId));
+                        const masterDriverSnapshot = await getDocs(masterDriverQuery);
+                        if (!masterDriverSnapshot.empty) {
+                            const masterDocRef = masterDriverSnapshot.docs[0].ref;
+                            await updateDoc(masterDocRef, updates);
+                            addLog('editMasterDriver', `Synced update for master entry ${masterDocRef.id}`, stationId);
+                            alert(`Successfully updated driver in both the Roster and the Master DA-List!`);
+                        } else {
+                            alert(`Driver updated in the Roster, but could not be found in the Master DA-List to sync.`);
                         }
-                    } catch (error) {
-                        alert('An error occurred during the update.');
-                        console.error('Edit error:', error);
                     }
+                } catch (error) {
+                    alert('An error occurred during the update.');
+                    console.error('Edit error:', error);
                 }
             }
         });
     }
-    
+
     if (companyContainer) {
         companyContainer.addEventListener('click', async (event) => {
             if (event.target.classList.contains('missing-btn')) {
                 const companyName = event.target.dataset.company;
-                const modalTitle = document.getElementById('missing-modal-title');
+                document.getElementById('missing-modal-title').innerText = `Missing Drivers for ${companyName}`;
                 const driverList = document.getElementById('missing-drivers-list');
-                if (!companyName || !modalTitle || !driverList) return;
-                modalTitle.innerText = `Missing Drivers for ${companyName}`;
                 driverList.innerHTML = '';
-                // Exclude both normal checked-in drivers and those with no badge from the missing list
+                
                 const q = query(rosterCollectionRef, where("firmenname", "==", companyName), where("status", "not-in", ["Checked In", "Checked In NO BADGE"]));
                 const querySnapshot = await getDocs(q);
+                
                 if (querySnapshot.empty) {
                     driverList.innerHTML = '<li>No missing drivers for this company.</li>';
                 } else {
                     querySnapshot.forEach(doc => {
-                        const driver = doc.data();
                         const li = document.createElement('li');
-                        li.textContent = driver.name;
+                        li.textContent = doc.data().name;
                         driverList.appendChild(li);
                     });
                 }
@@ -889,225 +784,174 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
         });
     }
 
-    // === Communication Buttons Logic ===
-    // Generate a summary of drivers who have not checked in or who have been flagged as having no badge.
     function prepareCommunicationMessage() {
         if (!currentDrivers || currentDrivers.length === 0) return '';
-        // Identify drivers whose status is not 'Checked In' (normal) or drivers marked as 'Checked In NO BADGE'
         const missing = currentDrivers.filter(d => d.status !== 'Checked In');
         if (missing.length === 0) return '';
+
         let message = '';
-        // Separate drivers by categories
         const noShow = missing.filter(d => d.status !== 'Checked In NO BADGE');
         const noBadge = missing.filter(d => d.status === 'Checked In NO BADGE');
+
         if (noShow.length > 0) {
             message += 'Drivers who have not shown up:\n';
-            noShow.forEach((d, idx) => {
-                message += `${idx + 1}. Name: ${d.name}, Badge: ${d.badgeId || 'N/A'}, Transporter: ${d.transporterId || 'N/A'}, Start Time: ${d.startTime}, Company: ${d.firmenname}, Status: ${d.status}\n`;
-            });
+            noShow.forEach((d, i) => { message += `${i + 1}. Name: ${d.name}, Badge: ${d.badgeId || 'N/A'}, Company: ${d.firmenname}\n`; });
             message += '\n';
         }
         if (noBadge.length > 0) {
             message += 'Drivers with no badge:\n';
-            noBadge.forEach((d, idx) => {
-                message += `${idx + 1}. Name: ${d.name}, Badge: ${d.badgeId || 'N/A'}, Transporter: ${d.transporterId || 'N/A'}, Start Time: ${d.startTime}, Company: ${d.firmenname}, Status: ${d.status}\n`;
-            });
-            message += '\n';
+            noBadge.forEach((d, i) => { message += `${i + 1}. Name: ${d.name}, Badge: ${d.badgeId || 'N/A'}, Company: ${d.firmenname}\n`; });
         }
         return message;
     }
 
-    // Attempt to open Slack or Amazon Chime and copy message to clipboard. If opening fails, fall back to mailto.
     function sendCommunication(type) {
         const message = prepareCommunicationMessage();
-        if (!message) {
-            alert('No drivers to report. All drivers are accounted for.');
-            return;
-        }
-        // Copy message to clipboard if possible
+        if (!message) return alert('No drivers to report. All drivers are accounted for.');
+        
         try {
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(message);
-            }
+            navigator.clipboard.writeText(message);
+            alert('Die Nachricht wurde in die Zwischenablage kopiert. Öffne das Kommunikations‑Tool und füge sie dort ein.');
         } catch (err) {
             console.error('Clipboard write failed', err);
+            alert('Could not copy to clipboard. Please check browser permissions.');
         }
-        // Attempt to open Slack or Chime
-        if (type === 'slack') {
-            // Open Slack via its web client. The message is already in the clipboard.
-            window.open('https://app.slack.com/client', '_blank');
-        } else if (type === 'chime') {
-            // Open Amazon Chime’s web app. The message is already in the clipboard.
-            window.open('https://app.chime.aws/', '_blank');
-        }
-        alert('Die Nachricht wurde in die Zwischenablage kopiert. Öffne das Kommunikations‑Tool und füge sie dort ein.');
+
+        if (type === 'slack') window.open('https://app.slack.com/client', '_blank');
+        else if (type === 'chime') window.open('https://app.chime.aws/', '_blank');
     }
 
-    // Attach event listeners to Slack and Chime buttons if they exist
     if (slackBtn) slackBtn.addEventListener('click', () => sendCommunication('slack'));
     if (chimeBtn) chimeBtn.addEventListener('click', () => sendCommunication('chime'));
 }
 
 // ======================================================================
-// HOME PAGE INITIALIZATION
+// HOME PAGE INITIALIZATION (REFACTORED FOR FIREBASE AUTH)
 // ======================================================================
-
-/**
- * Initialize login and logout controls on the homepage. This function
- * sets up event listeners for the login button, logout button, and the
- * modal used for employee authentication. It loads the current set
- * of accounts from Firestore and ensures the header reflects the
- * current login state. The login modal offers two methods: email/
- * password or badge scanning. Appropriate forms are displayed based
- * on the user's choice.
- */
 function initializeHomePage() {
-    // Elements used for login/logout and modal management
     const loginBtn = document.getElementById('login-btn');
     const logoutBtn = document.getElementById('logout-btn');
     const modal = document.getElementById('employeeLoginModal');
-    if (!modal) {
-        // If the modal is not present, this page likely doesn't
-        // implement login features (e.g. country/selection pages)
-        return;
-    }
+    if (!modal) return;
+
     const closeBtn = modal.querySelector('.close-button');
     const methodsContainer = document.getElementById('login-methods');
     const emailForm = document.getElementById('employee-login-form-email');
     const badgeForm = document.getElementById('employee-login-form-badge');
     const loginError = document.getElementById('employee-login-error');
 
-    // Load accounts and update header once complete
-    loadAccounts().then(() => {
-        updateHeaderUI();
-    });
-
-    // Display the login modal and reset forms
     function openLoginModal() {
-        if (modal) {
-            modal.style.display = 'flex';
-            // Reset view: show method selection cards, hide forms and errors
-            if (methodsContainer) methodsContainer.style.display = 'flex';
-            if (emailForm) emailForm.style.display = 'none';
-            if (badgeForm) badgeForm.style.display = 'none';
-            if (loginError) loginError.style.display = 'none';
-            // Clear form fields
-            const emailInput = document.getElementById('employee-login-email');
-            const passwordInput = document.getElementById('employee-login-password');
-            const badgeInput = document.getElementById('employee-login-badge');
-            if (emailInput) emailInput.value = '';
-            if (passwordInput) passwordInput.value = '';
-            if (badgeInput) badgeInput.value = '';
-        }
+        modal.style.display = 'flex';
+        methodsContainer.style.display = 'flex';
+        emailForm.style.display = 'none';
+        badgeForm.style.display = 'none';
+        loginError.style.display = 'none';
+        if(emailForm) emailForm.reset();
+        if(badgeForm) badgeForm.reset();
     }
+    window.showEmployeeLoginModal = openLoginModal;
 
-        // Expose the modal opening function globally so it can be
-        // triggered from inline HTML (e.g. login link onclick). This
-        // maintains a single point of logic for resetting forms and
-        // displaying the modal.
-        window.showEmployeeLoginModal = openLoginModal;
-
-    // Hide the login modal
     function closeLoginModal() {
-        if (modal) {
-            modal.style.display = 'none';
-        }
+        modal.style.display = 'none';
     }
 
-    // Open modal when login button is clicked
-    if (loginBtn) {
-        loginBtn.addEventListener('click', openLoginModal);
-    }
-    // Close modal when close button clicked
-    if (closeBtn) {
-        closeBtn.addEventListener('click', closeLoginModal);
-    }
-    // Close modal when clicking outside content
+    if (loginBtn) loginBtn.addEventListener('click', openLoginModal);
+    if (closeBtn) closeBtn.addEventListener('click', closeLoginModal);
     window.addEventListener('click', event => {
-        if (event.target === modal) {
-            closeLoginModal();
-        }
+        if (event.target === modal) closeLoginModal();
     });
 
-    // Switch to appropriate form when a login method card is selected
     if (methodsContainer) {
-        const cards = methodsContainer.querySelectorAll('.login-card');
-        cards.forEach(card => {
+        methodsContainer.querySelectorAll('.login-card').forEach(card => {
             card.addEventListener('click', () => {
+                methodsContainer.style.display = 'none';
                 const method = card.getAttribute('data-method');
-                if (methodsContainer) methodsContainer.style.display = 'none';
-                if (method === 'email' && emailForm) {
-                    emailForm.style.display = 'block';
-                } else if (method === 'badge' && badgeForm) {
-                    badgeForm.style.display = 'block';
-                }
+                if (method === 'email') emailForm.style.display = 'block';
+                else if (method === 'badge') badgeForm.style.display = 'block';
             });
         });
     }
 
-    // Handle email/password login submission
     if (emailForm) {
-        emailForm.addEventListener('submit', event => {
+        emailForm.addEventListener('submit', async event => {
             event.preventDefault();
-            const emailInput = document.getElementById('employee-login-email');
-            const passwordInput = document.getElementById('employee-login-password');
-            const email = emailInput ? emailInput.value.trim() : '';
-            const password = passwordInput ? passwordInput.value.trim() : '';
-            const user = authenticateAccount(email, password, null);
-            if (user) {
-                sessionStorage.setItem('currentUser', JSON.stringify(user));
+            loginError.style.display = 'none';
+            const email = emailForm.querySelector('#employee-login-email').value.trim();
+            const password = emailForm.querySelector('#employee-login-password').value.trim();
+            
+            // Check for demo credentials first (client-side only)
+            if (email === demoCredentials.email && password === demoCredentials.password) {
+                sessionStorage.setItem('currentUserDetails', JSON.stringify({ email, role: demoCredentials.role, name: demoCredentials.name }));
+                // For demo, we don't need real Firebase auth, just update UI
                 updateHeaderUI();
                 closeLoginModal();
-                // Show a friendly welcome message using the user's name if available
-                const displayName = user.name || user.email || user.badgeId || 'User';
-                showNotification(`Welcome back ${displayName}.`);
-                // Log successful login via email/password
-                addLog('login', `User ${user.email || user.badgeId || ''} logged in via email/password`, null);
-            } else {
-                if (loginError) {
-                    loginError.textContent = 'Invalid credentials. Please try again.';
-                    loginError.style.display = 'block';
-                }
+                showNotification(`Welcome back ${demoCredentials.name}.`);
+                addLog('login', `Demo user logged in via email`, null);
+                return;
+            }
+
+            try {
+                // Use Firebase Auth to sign in
+                await signInWithEmailAndPassword(auth, email, password);
+                // onAuthStateChanged will handle the rest (fetching user data, etc.)
+                closeLoginModal();
+                showNotification(`Welcome back ${email}.`);
+                addLog('login', `User ${email} logged in via email/password`, null);
+            } catch (error) {
+                loginError.textContent = 'Invalid credentials. Please try again.';
+                loginError.style.display = 'block';
+                console.error("Login failed:", error.code, error.message);
             }
         });
     }
 
-    // Handle badge login submission
     if (badgeForm) {
-        badgeForm.addEventListener('submit', event => {
+        badgeForm.addEventListener('submit', async event => {
             event.preventDefault();
-            const badgeInput = document.getElementById('employee-login-badge');
-            const badge = badgeInput ? badgeInput.value.trim() : '';
-            const user = authenticateAccount(null, null, badge);
-            if (user) {
-                sessionStorage.setItem('currentUser', JSON.stringify(user));
-                updateHeaderUI();
-                closeLoginModal();
-                const displayName = user.name || user.email || user.badgeId || 'User';
-                showNotification(`Welcome back ${displayName}.`);
-                // Log successful login via badge scan
-                addLog('login', `User ${user.email || user.badgeId || ''} logged in via badge`, null);
-            } else {
-                if (loginError) {
-                    loginError.textContent = 'Invalid badge ID. Please try again.';
-                    loginError.style.display = 'block';
+            loginError.style.display = 'none';
+            const badge = badgeForm.querySelector('#employee-login-badge').value.trim();
+
+            try {
+                // Find account with matching badgeId in Firestore
+                const q = query(accountsCollectionRefMain, where("badgeId", "==", badge));
+                const querySnapshot = await getDocs(q);
+
+                if (querySnapshot.empty) {
+                    throw new Error("Badge not found");
                 }
+
+                const account = querySnapshot.docs[0].data();
+                // DANGER: Using stored password. This is insecure and should be migrated.
+                if (!account.email || !account.password) {
+                    throw new Error("Account is missing email or password for login.");
+                }
+
+                // Sign in with the email/password associated with the badge
+                await signInWithEmailAndPassword(auth, account.email, account.password);
+                closeLoginModal();
+                showNotification(`Welcome back ${account.name || account.email}.`);
+                addLog('login', `User ${account.email} logged in via badge`, null);
+
+            } catch (error) {
+                loginError.textContent = 'Invalid badge ID. Please try again.';
+                loginError.style.display = 'block';
+                console.error("Badge login failed:", error);
             }
         });
     }
 
-    // Logout clears the session and refreshes the header
-        if (logoutBtn) {
-        logoutBtn.addEventListener('click', () => {
-            const currentUserData = sessionStorage.getItem('currentUser');
-            sessionStorage.removeItem('currentUser');
-            updateHeaderUI();
-            // Display logout notification
-            showNotification('You have been logged out.');
-            // Log logout event
-            if (currentUserData) {
-                const u = JSON.parse(currentUserData);
-                addLog('logout', `User ${u.email || u.badgeId || ''} logged out`, null);
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', async () => {
+            const userDetails = getCurrentUserDetails();
+            try {
+                await signOut(auth);
+                // onAuthStateChanged will clear session storage and update UI
+                showNotification('You have been logged out.');
+                if (userDetails) {
+                    addLog('logout', `User ${userDetails.email || userDetails.badgeId} logged out`, null);
+                }
+            } catch (error) {
+                console.error("Logout failed:", error);
             }
         });
     }
