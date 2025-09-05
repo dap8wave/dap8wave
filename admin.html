@@ -160,6 +160,12 @@
         // Import Firebase services for authentication and Firestore
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
         import { getFirestore, collection, getDocs, addDoc, updateDoc, doc, deleteDoc, query, orderBy } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+        // Import Firebase Authentication functions.  These allow us to create
+        // corresponding user accounts in Firebase Auth whenever a new account is
+        // created from the admin dashboard.  Without this, employees defined in
+        // Firestore only will not be able to log in once Firestore rules
+        // enforce that `request.auth` must be non‑null.
+        import { getAuth, createUserWithEmailAndPassword } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 
         // Predefined demo credentials (you can replace with real authentication logic)
         const demoCredentials = {
@@ -180,6 +186,11 @@
         // Initialize Firebase app and Firestore
         const firebaseApp = initializeApp(firebaseConfig);
         const db = getFirestore(firebaseApp);
+        // Initialize Firebase Auth using the same app instance.  This is used to
+        // register new users in the Authentication service when accounts are
+        // created via the admin dashboard.  See `createAccountForm` submit
+        // handler below for the actual invocation.
+        const auth = getAuth(firebaseApp);
         // Reference to the accounts collection in Firestore
         const accountsCollectionRef = collection(db, 'accounts');
 
@@ -464,6 +475,33 @@
             } else {
                 // Create new account
                 try {
+                    // First attempt to create a corresponding Firebase Auth user.  Using
+                    // email/password authentication requires that the user exist in
+                    // Firebase Authentication; otherwise the employee will be unable
+                    // to log in once Firestore rules enforce `request.auth != null`.
+                    // If the email is already in use, we silently ignore the error and
+                    // proceed to create/update the Firestore document so the role and
+                    // station information are still recorded.
+                    try {
+                        await createUserWithEmailAndPassword(auth, email, password);
+                    } catch (authError) {
+                        if (authError.code !== 'auth/email-already-in-use') {
+                            console.error('Error creating Firebase Auth user:', authError);
+                            createAccountMessage.textContent = 'An error occurred while creating the Firebase Auth user. Please try a different email.';
+                            createAccountMessage.style.display = 'block';
+                            return;
+                        }
+                        // If the user already exists in Auth, we do not need to create it again.  
+                        // Optionally we could update the password here using Admin SDK or
+                        // require the user to reset their password.
+                    }
+
+                    // Now create the Firestore document for the account.  This stores
+                    // non‑authentication metadata like role, badge ID, and permitted
+                    // stations.  The plain‑text password remains in Firestore to
+                    // support legacy badge login flows, but you should remove it once
+                    // all users have migrated to Firebase Auth (see comments in
+                    // script.js).
                     const docRef = await addDoc(accountsCollectionRef, { name, email, password, badgeId, role, stations: selectedStations });
                     const newAccount = { id: docRef.id, name, email, password, badgeId, role, stations: selectedStations };
                     createdAccounts.push(newAccount);
