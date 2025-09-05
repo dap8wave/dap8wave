@@ -159,13 +159,26 @@
     <script type="module">
         // Import Firebase services for authentication and Firestore
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
-        import { getFirestore, collection, getDocs, addDoc, updateDoc, doc, deleteDoc, query, orderBy } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+        import { getFirestore, collection, getDocs, addDoc, updateDoc, doc, deleteDoc, query, orderBy, where } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
         // Import Firebase Authentication functions.  These allow us to create
         // corresponding user accounts in Firebase Auth whenever a new account is
-        // created from the admin dashboard.  Without this, employees defined in
-        // Firestore only will not be able to log in once Firestore rules
-        // enforce that `request.auth` must be non‑null.
-        import { getAuth, createUserWithEmailAndPassword } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
+        // created from the admin dashboard and to authenticate admins securely.
+        // Without this, employees defined in Firestore only will not be able to
+        // log in once Firestore rules enforce that `request.auth` must be
+        // non‑null.
+        // We revert to a client‑side only login for the admin panel.  Therefore
+        // we do not import Firebase Authentication functions.  User
+        // verification is performed entirely on the client by reading the
+        // accounts collection.
+        /*
+         * Firebase Authentication is intentionally **not** imported here.  This admin
+         * dashboard implements a legacy, client‑side only login and account
+         * creation mechanism which does not rely on Firebase Auth.  User
+         * verification and credential storage occur entirely within Firestore
+         * (and in the browser), which is insecure but mirrors the original
+         * application behavior prior to the migration attempt.  See
+         * script.js for a discussion of why this is a security risk.
+         */
 
         // Predefined demo credentials (you can replace with real authentication logic)
         const demoCredentials = {
@@ -186,11 +199,8 @@
         // Initialize Firebase app and Firestore
         const firebaseApp = initializeApp(firebaseConfig);
         const db = getFirestore(firebaseApp);
-        // Initialize Firebase Auth using the same app instance.  This is used to
-        // register new users in the Authentication service when accounts are
-        // created via the admin dashboard.  See `createAccountForm` submit
-        // handler below for the actual invocation.
-        const auth = getAuth(firebaseApp);
+        // We no longer initialize Firebase Auth.  All admin authentication is handled
+        // entirely on the client against the downloaded accounts list.
         // Reference to the accounts collection in Firestore
         const accountsCollectionRef = collection(db, 'accounts');
 
@@ -348,7 +358,10 @@
         }
 
         // Helper to perform authentication for admin login. Returns the
-        // matching account if credentials are valid, otherwise null.
+        // matching account if credentials are valid, otherwise null.  This
+        // function checks the demo credentials first and then searches
+        // through the loaded accounts (createdAccounts) for a matching
+        // email/password or badge ID.
         function authenticateAdmin(email, password, badge) {
             // Check demo credentials
             if ((email && password && email === demoCredentials.email && password === demoCredentials.password) ||
@@ -362,10 +375,16 @@
             )) || null;
         }
 
-        // Submit handler for admin email/password login
+
+
+        // Submit handler for admin email/password login (client‑side only).  We
+        // check the demo credentials first, then search through the loaded
+        // accounts array.  Users with roles Developer, L4+ or L3 are allowed
+        // to access the admin dashboard.
         if (adminEmailForm) {
             adminEmailForm.addEventListener('submit', event => {
                 event.preventDefault();
+                loginError.style.display = 'none';
                 const email = document.getElementById('admin-login-email').value.trim();
                 const password = document.getElementById('admin-login-password').value.trim();
                 const user = authenticateAdmin(email, password, null);
@@ -377,7 +396,8 @@
                         adminEmailForm.reset();
                         // Log admin login
                         addLogAdmin('adminLogin', `Admin logged in via email (${email})`, null);
-                        // Load logs into the dashboard
+                        // Load accounts and logs into the dashboard
+                        loadAccounts();
                         loadLogs();
                     } else {
                         loginError.textContent = 'You do not have permission to access the admin panel.';
@@ -390,10 +410,14 @@
             });
         }
 
-        // Submit handler for admin badge login
+        // Submit handler for admin badge login (client‑side only).  We search
+        // through the loaded accounts array to match on badge ID.  Only
+        // accounts with roles Developer, L4+, or L3 are allowed into the
+        // admin dashboard.
         if (adminBadgeForm) {
             adminBadgeForm.addEventListener('submit', event => {
                 event.preventDefault();
+                loginError.style.display = 'none';
                 const badge = document.getElementById('admin-login-badge').value.trim();
                 const user = authenticateAdmin(null, null, badge);
                 if (user) {
@@ -402,9 +426,8 @@
                         loginSection.style.display = 'none';
                         dashboardSection.style.display = 'block';
                         adminBadgeForm.reset();
-                        // Log admin login
                         addLogAdmin('adminLogin', `Admin logged in via badge (${badge})`, null);
-                        // Load logs into the dashboard
+                        loadAccounts();
                         loadLogs();
                     } else {
                         loginError.textContent = 'You do not have permission to access the admin panel.';
@@ -421,8 +444,11 @@
         const createAccountForm = document.getElementById('create-account-form');
         const createAccountMessage = document.getElementById('create-account-message');
         const accountsTableBody = document.querySelector('#accounts-table tbody');
-        // Once the table body is available, load existing accounts from Firestore
-        loadAccounts();
+        // Loading of accounts from Firestore will occur once the admin has successfully
+        // authenticated via Firebase Auth (see onAuthStateChanged above).  We do not
+        // load accounts here because Firestore rules require the user to be
+        // authenticated.  The button for creating accounts is still queried
+        // below.
         const createAccountBtn = createAccountForm.querySelector('button[type="submit"]');
 
         createAccountForm.addEventListener('submit', async event => {
@@ -475,33 +501,13 @@
             } else {
                 // Create new account
                 try {
-                    // First attempt to create a corresponding Firebase Auth user.  Using
-                    // email/password authentication requires that the user exist in
-                    // Firebase Authentication; otherwise the employee will be unable
-                    // to log in once Firestore rules enforce `request.auth != null`.
-                    // If the email is already in use, we silently ignore the error and
-                    // proceed to create/update the Firestore document so the role and
-                    // station information are still recorded.
-                    try {
-                        await createUserWithEmailAndPassword(auth, email, password);
-                    } catch (authError) {
-                        if (authError.code !== 'auth/email-already-in-use') {
-                            console.error('Error creating Firebase Auth user:', authError);
-                            createAccountMessage.textContent = 'An error occurred while creating the Firebase Auth user. Please try a different email.';
-                            createAccountMessage.style.display = 'block';
-                            return;
-                        }
-                        // If the user already exists in Auth, we do not need to create it again.  
-                        // Optionally we could update the password here using Admin SDK or
-                        // require the user to reset their password.
-                    }
-
-                    // Now create the Firestore document for the account.  This stores
+                    // Create the Firestore document for the account.  This stores
                     // non‑authentication metadata like role, badge ID, and permitted
                     // stations.  The plain‑text password remains in Firestore to
-                    // support legacy badge login flows, but you should remove it once
-                    // all users have migrated to Firebase Auth (see comments in
-                    // script.js).
+                    // support legacy badge login flows.  **WARNING:** Storing
+                    // plaintext passwords is insecure and should only be used
+                    // temporarily; consider migrating to Firebase Auth once you
+                    // no longer need legacy badge logins.
                     const docRef = await addDoc(accountsCollectionRef, { name, email, password, badgeId, role, stations: selectedStations });
                     const newAccount = { id: docRef.id, name, email, password, badgeId, role, stations: selectedStations };
                     createdAccounts.push(newAccount);

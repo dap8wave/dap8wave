@@ -37,7 +37,12 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getFirestore, collection, getDocs, getDoc, addDoc, onSnapshot, doc, deleteDoc, updateDoc, writeBatch, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 // FIX: Import Firebase Authentication functions
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+// Note: We are reverting to a client‑side only authentication mechanism that
+// does NOT use Firebase Authentication.  As a result, we no longer import
+// any Firebase Auth functions.  This means all user credentials are
+// downloaded to the client and verified locally, which is insecure but
+// necessary if you choose to bypass Firebase Auth.
+
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
@@ -52,8 +57,8 @@ const firebaseConfig = {
 // Initialize Firebase and get references to the services
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
-// FIX: Initialize the Firebase Auth service
-const auth = getAuth(app);
+// We no longer initialize Firebase Auth.  All login logic is handled on
+// the client using data downloaded from Firestore.
 
 
 // ======================================================================
@@ -64,16 +69,13 @@ const logsCollectionRef = collection(db, 'logs');
 async function addLog(action, details, stationId = null) {
     try {
         let userIdentifier = 'Unknown';
-        // FIX: Use the actual Firebase Auth user for logging
-        if (auth.currentUser) {
-            userIdentifier = auth.currentUser.email;
-        } else {
-            // Fallback for logged-out actions or if auth state is not yet available
-            const sessionUser = sessionStorage.getItem('currentUserDetails');
-            if (sessionUser) {
-                const userObj = JSON.parse(sessionUser);
-                userIdentifier = userObj.email || userObj.badgeId || 'Session User';
-            }
+        // When not using Firebase Auth, derive the user identifier from the
+        // current session (sessionStorage).  If no user is logged in, fall
+        // back to a generic identifier.
+        const sessionUser = sessionStorage.getItem('currentUserDetails');
+        if (sessionUser) {
+            const userObj = JSON.parse(sessionUser);
+            userIdentifier = userObj.email || userObj.badgeId || 'Session User';
         }
         await addDoc(logsCollectionRef, {
             timestamp: Date.now(),
@@ -106,7 +108,6 @@ const demoCredentials = {
  * current session and Firebase Auth state.
  */
 function updateHeaderUI() {
-    const user = auth.currentUser;
     const userDetails = sessionStorage.getItem('currentUserDetails');
     const role = userDetails ? JSON.parse(userDetails).role : null;
 
@@ -114,7 +115,7 @@ function updateHeaderUI() {
     const logoutBtn = document.getElementById('logout-btn');
 
     if (loginBtn && logoutBtn) {
-        if (user) {
+        if (userDetails) {
             loginBtn.style.display = 'none';
             logoutBtn.style.display = 'inline-block';
         } else {
@@ -126,7 +127,7 @@ function updateHeaderUI() {
     const adminLinks = document.querySelectorAll('.admin-button-link[href*="admin"], #adminBtn');
     adminLinks.forEach(link => {
         // Use the role from our fetched user details
-        if (user && role && ['Developer', 'L4+', 'L3'].includes(role)) {
+        if (userDetails && role && ['Developer', 'L4+', 'L3'].includes(role)) {
             link.style.display = 'inline-block';
         } else {
             link.style.display = 'none';
@@ -178,34 +179,32 @@ function initializeTheme() {
 }
 
 // ======================================================================
-// MAIN SCRIPT LOGIC
+// MAIN SCRIPT LOGIC (CLIENT‑SIDE AUTHENTICATION)
 // ======================================================================
-// FIX: The entire application logic is now wrapped in onAuthStateChanged.
-// This ensures that we know the user's login status BEFORE running any page-specific code.
-onAuthStateChanged(auth, async (user) => {
-    if (user) {
-        // User is signed in.
-        // Fetch their role and station data from the 'accounts' collection.
-        const q = query(accountsCollectionRefMain, where("email", "==", user.email));
-        const querySnapshot = await getDocs(q);
-        if (!querySnapshot.empty) {
-            const userAccountData = querySnapshot.docs[0].data();
-            // Store role, stations etc. in sessionStorage for easy access across the app.
-            sessionStorage.setItem('currentUserDetails', JSON.stringify(userAccountData));
-        } else {
-            // User is logged in with Firebase, but has no entry in our 'accounts' collection.
-            // Clear session details to prevent incorrect permissions.
-            sessionStorage.removeItem('currentUserDetails');
-            console.warn(`User ${user.email} is authenticated but has no account document.`);
-        }
-    } else {
-        // User is signed out.
-        sessionStorage.removeItem('currentUserDetails');
-    }
+// We fetch all accounts from Firestore on page load.  This allows the client
+// to authenticate users locally by comparing entered credentials with the
+// downloaded account data.  After accounts are fetched, we initialize
+// the appropriate page logic.  NOTE: This exposes all account data to any
+// client and is inherently insecure.
 
-    // Now that authentication is resolved, run the page-specific logic.
+// Global array to hold all account documents.  Populated by fetchAllAccounts().
+let allAccounts = [];
+
+async function fetchAllAccounts() {
+    try {
+        const snapshot = await getDocs(accountsCollectionRefMain);
+        allAccounts = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+    } catch (error) {
+        console.error('Error fetching accounts:', error);
+        allAccounts = [];
+    }
+}
+
+// Immediately invoked async function to load accounts and initialize the page
+(async function() {
+    await fetchAllAccounts();
     initializePage();
-});
+})();
 
 
 /**
@@ -213,7 +212,8 @@ onAuthStateChanged(auth, async (user) => {
  * appropriate initialization logic.
  */
 function initializePage() {
-    // This function runs AFTER onAuthStateChanged has determined the login state.
+    // This function runs after accounts have been fetched and any existing
+    // session has been restored.  No Firebase Auth is involved.
     updateHeaderUI();
     initializeTheme();
 
@@ -221,9 +221,11 @@ function initializePage() {
 
     if (stationPageWrapper) {
         const stationId = stationPageWrapper.dataset.stationId;
-        const currentUserDetails = getCurrentUserDetails(); // Use our new helper
+        const currentUserDetails = getCurrentUserDetails();
 
-        if (!auth.currentUser) {
+        // Without Firebase Auth, we rely solely on sessionStorage to determine
+        // whether a user is logged in.  If no session exists, redirect to home.
+        if (!currentUserDetails) {
             alert('You must log in to access this page.');
             window.location.href = 'index.html';
             return;
@@ -873,16 +875,15 @@ function initializeHomePage() {
     }
 
     if (emailForm) {
-        emailForm.addEventListener('submit', async event => {
+        emailForm.addEventListener('submit', event => {
             event.preventDefault();
             loginError.style.display = 'none';
             const email = emailForm.querySelector('#employee-login-email').value.trim();
             const password = emailForm.querySelector('#employee-login-password').value.trim();
-            
+
             // Check for demo credentials first (client-side only)
             if (email === demoCredentials.email && password === demoCredentials.password) {
                 sessionStorage.setItem('currentUserDetails', JSON.stringify({ email, role: demoCredentials.role, name: demoCredentials.name }));
-                // For demo, we don't need real Firebase auth, just update UI
                 updateHeaderUI();
                 closeLoginModal();
                 showNotification(`Welcome back ${demoCredentials.name}.`);
@@ -890,68 +891,51 @@ function initializeHomePage() {
                 return;
             }
 
-            try {
-                // Use Firebase Auth to sign in
-                await signInWithEmailAndPassword(auth, email, password);
-                // onAuthStateChanged will handle the rest (fetching user data, etc.)
+            // Look up the account in the downloaded list of accounts
+            const account = allAccounts.find(acc => acc.email === email && acc.password === password);
+            if (account) {
+                sessionStorage.setItem('currentUserDetails', JSON.stringify(account));
+                updateHeaderUI();
                 closeLoginModal();
-                showNotification(`Welcome back ${email}.`);
-                addLog('login', `User ${email} logged in via email/password`, null);
-            } catch (error) {
+                showNotification(`Welcome back ${account.name || account.email}.`);
+                addLog('login', `User ${account.email} logged in via email/password`, null);
+            } else {
                 loginError.textContent = 'Invalid credentials. Please try again.';
                 loginError.style.display = 'block';
-                console.error("Login failed:", error.code, error.message);
             }
         });
     }
 
     if (badgeForm) {
-        badgeForm.addEventListener('submit', async event => {
+        badgeForm.addEventListener('submit', event => {
             event.preventDefault();
             loginError.style.display = 'none';
             const badge = badgeForm.querySelector('#employee-login-badge').value.trim();
-
-            try {
-                // Find account with matching badgeId in Firestore
-                const q = query(accountsCollectionRefMain, where("badgeId", "==", badge));
-                const querySnapshot = await getDocs(q);
-
-                if (querySnapshot.empty) {
-                    throw new Error("Badge not found");
-                }
-
-                const account = querySnapshot.docs[0].data();
-                // DANGER: Using stored password. This is insecure and should be migrated.
-                if (!account.email || !account.password) {
-                    throw new Error("Account is missing email or password for login.");
-                }
-
-                // Sign in with the email/password associated with the badge
-                await signInWithEmailAndPassword(auth, account.email, account.password);
+            // Look up the account by badge ID in the downloaded list
+            const account = allAccounts.find(acc => acc.badgeId && String(acc.badgeId) === badge);
+            if (account) {
+                sessionStorage.setItem('currentUserDetails', JSON.stringify(account));
+                updateHeaderUI();
                 closeLoginModal();
                 showNotification(`Welcome back ${account.name || account.email}.`);
                 addLog('login', `User ${account.email} logged in via badge`, null);
-
-            } catch (error) {
+            } else {
                 loginError.textContent = 'Invalid badge ID. Please try again.';
                 loginError.style.display = 'block';
-                console.error("Badge login failed:", error);
             }
         });
     }
 
     if (logoutBtn) {
-        logoutBtn.addEventListener('click', async () => {
+        logoutBtn.addEventListener('click', () => {
             const userDetails = getCurrentUserDetails();
-            try {
-                await signOut(auth);
-                // onAuthStateChanged will clear session storage and update UI
-                showNotification('You have been logged out.');
-                if (userDetails) {
-                    addLog('logout', `User ${userDetails.email || userDetails.badgeId} logged out`, null);
-                }
-            } catch (error) {
-                console.error("Logout failed:", error);
+            // Clear the session and update the header UI.  Without Firebase Auth
+            // we simply remove the stored user details.
+            sessionStorage.removeItem('currentUserDetails');
+            updateHeaderUI();
+            showNotification('You have been logged out.');
+            if (userDetails) {
+                addLog('logout', `User ${userDetails.email || userDetails.badgeId} logged out`, null);
             }
         });
     }
