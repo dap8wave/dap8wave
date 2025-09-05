@@ -382,9 +382,17 @@
         // accounts array.  Users with roles Developer, L4+ or L3 are allowed
         // to access the admin dashboard.
         if (adminEmailForm) {
-            adminEmailForm.addEventListener('submit', event => {
+            adminEmailForm.addEventListener('submit', async event => {
                 event.preventDefault();
                 loginError.style.display = 'none';
+                // Ensure the accounts list is loaded before authentication
+                if (createdAccounts.length === 0) {
+                    try {
+                        await loadAccounts();
+                    } catch (e) {
+                        console.error('Error preloading accounts before login:', e);
+                    }
+                }
                 const email = document.getElementById('admin-login-email').value.trim();
                 const password = document.getElementById('admin-login-password').value.trim();
                 const user = authenticateAdmin(email, password, null);
@@ -415,9 +423,17 @@
         // accounts with roles Developer, L4+, or L3 are allowed into the
         // admin dashboard.
         if (adminBadgeForm) {
-            adminBadgeForm.addEventListener('submit', event => {
+            adminBadgeForm.addEventListener('submit', async event => {
                 event.preventDefault();
                 loginError.style.display = 'none';
+                // Ensure the accounts list is loaded before authentication
+                if (createdAccounts.length === 0) {
+                    try {
+                        await loadAccounts();
+                    } catch (e) {
+                        console.error('Error preloading accounts before login:', e);
+                    }
+                }
                 const badge = document.getElementById('admin-login-badge').value.trim();
                 const user = authenticateAdmin(null, null, badge);
                 if (user) {
