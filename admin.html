@@ -451,6 +451,18 @@
         // below.
         const createAccountBtn = createAccountForm.querySelector('button[type="submit"]');
 
+        // ------------------------------------------------------------------
+        // LOAD ACCOUNTS ON PAGE LOAD
+        // ------------------------------------------------------------------
+        // When running in the legacy client‑side only login mode, we need the
+        // complete list of accounts available before a user attempts to sign
+        // into the admin dashboard.  Without preloading the accounts, the
+        // authenticateAdmin function has nothing to match against and will
+        // reject every credential except the hard‑coded demo credentials.  To
+        // ensure that createdAccounts is populated at startup, call
+        // loadAccounts() once after the accountsTableBody has been defined.
+        loadAccounts();
+
         createAccountForm.addEventListener('submit', async event => {
             event.preventDefault();
             const name = document.getElementById('new-name').value.trim();
