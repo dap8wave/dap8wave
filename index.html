@@ -9,7 +9,7 @@
     <meta http-equiv="Expires" content="0">
     <title>Amazon Wave Check</title>
     
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=20250910071128">
     
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -25,7 +25,7 @@
         <a href="admin.html" class="admin-button-link">Admin</a>
         
         <a href="index.html">
-            <img src="https://www.franchiseverband.com/typo3temp/assets/_processed_/b/c/csm_Logo_Amazon_78ff002b7a.png" alt="Amazon Logo" class="amazon-logo">
+            <img loading="lazy" src="https://www.franchiseverband.com/typo3temp/assets/_processed_/b/c/csm_Logo_Amazon_78ff002b7a.png" alt="Amazon Logo" class="amazon-logo">
         </a>
     </header>
 
@@ -37,11 +37,11 @@
 
         <section class="country-selector">
             <a href="austria.html" class="country-card">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/4/41/Flag_of_Austria.svg" alt="Flag of Austria">
+                <img loading="lazy" src="https://upload.wikimedia.org/wikipedia/commons/4/41/Flag_of_Austria.svg" alt="Flag of Austria">
                 <span>Austria</span>
             </a>
             <a href="germany.html" class="country-card">
-                <img src="https://upload.wikimedia.org/wikipedia/en/b/ba/Flag_of_Germany.svg" alt="Flag of Germany">
+                <img loading="lazy" src="https://upload.wikimedia.org/wikipedia/en/b/ba/Flag_of_Germany.svg" alt="Flag of Germany">
                 <span>Germany</span>
             </a>
         </section>
@@ -94,6 +94,15 @@
         </div>
     </div>
     
-    <script type="module" src="script.js"></script>
+    <script type="module" src="script.js?v=20250910071128"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/service-worker.js').then(reg => {
+      console.log('SW registered', reg.scope);
+    }).catch(err => console.warn('SW registration failed', err));
+  });
+}
+</script>
 </body>
 </html>

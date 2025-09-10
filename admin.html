@@ -9,7 +9,7 @@
     <meta http-equiv="Expires" content="0">
     <title>Admin Dashboard – Wave Check</title>
     <!-- Reuse the existing styles to match the look and feel of the rest of the site -->
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=20250910071128">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
@@ -18,7 +18,7 @@
     <!-- Header with a link back to the homepage -->
     <header class="site-header">
         <a href="index.html">
-            <img src="https://www.franchiseverband.com/typo3temp/assets/_processed_/b/c/csm_Logo_Amazon_78ff002b7a.png" alt="Amazon Logo" class="amazon-logo">
+            <img loading="lazy" src="https://www.franchiseverband.com/typo3temp/assets/_processed_/b/c/csm_Logo_Amazon_78ff002b7a.png" alt="Amazon Logo" class="amazon-logo">
         </a>
     </header>
 
@@ -643,5 +643,14 @@
             header.appendChild(btn);
         })();
     </script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/service-worker.js').then(reg => {
+      console.log('SW registered', reg.scope);
+    }).catch(err => console.warn('SW registration failed', err));
+  });
+}
+</script>
 </body>
 </html>

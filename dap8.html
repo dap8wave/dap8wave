@@ -9,7 +9,7 @@
     <meta http-equiv="Expires" content="0">
     <title>DAP8 - Wave Check</title>
     
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=20250910071128">
     
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -23,10 +23,10 @@
         <a href="index.html" id="adminBtn" class="admin-button-link">Admin</a>
 
         <a href="index.html">
-            <img src="https://www.franchiseverband.com/typo3temp/assets/_processed_/b/c/csm_Logo_Amazon_78ff002b7a.png" alt="Amazon Logo" class="amazon-logo">
+            <img loading="lazy" src="https://www.franchiseverband.com/typo3temp/assets/_processed_/b/c/csm_Logo_Amazon_78ff002b7a.png" alt="Amazon Logo" class="amazon-logo">
         </a>
         <!-- DAP8 station bee logo added below the Amazon logo -->
-        <img src="dap8-logo.png" alt="DAP8 Logo" class="dap8-logo">
+        <img loading="lazy" src="dap8-logo.png" alt="DAP8 Logo" class="dap8-logo">
     </header>
 
     <main class="station-page-wrapper" data-station-id="DAP8">
@@ -227,6 +227,15 @@
         </div>
     </div>
 
-    <script type="module" src="script.js"></script>
+    <script type="module" src="script.js?v=20250910071128"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/service-worker.js').then(reg => {
+      console.log('SW registered', reg.scope);
+    }).catch(err => console.warn('SW registration failed', err));
+  });
+}
+</script>
 </body>
 </html>
