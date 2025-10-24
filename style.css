@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Creepster&family=Nosifer&family=Poppins:wght@300;400;600&display=swap');
+
 /* ==== GLOBAL STYLES & COLOR PALETTE (NEW DARK THEME) ==== */
 :root {
     --amazon-blue: #131921;
@@ -1196,4 +1198,73 @@ body.light-mode .notification {
     background-color: #333;
     color: #fff;
     box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+
+/* -----------------------------------------------------------------------
+ *  HALLOWEEN THEME OVERLAY
+ *  This section adds a spooky, Halloween-themed makeover to the site. It
+ *  overrides the default Amazon colour palette with a dark purple/orange
+ *  scheme and introduces glowing text, a foggy background, and floating
+ *  ghosts and bats via the companion spooky.js script.
+ *  Fonts are imported at the top of this stylesheet.
+ * --------------------------------------------------------------------- */
+
+/* Override primary palette for Halloween */
+:root {
+    /* Deep midnight purple background and panel colours */
+    --amazon-blue: #0b0614;
+    --secondary-blue: #17051b;
+    /* Pumpkin orange accent */
+    --amazon-orange: #ff9100;
+    /* Warm off‑white for primary text */
+    --text-light: #fff5e1;
+    /* Subtle translucent borders */
+    --border-color: rgba(255, 255, 255, 0.15);
+}
+
+/* Global body background: eerie gradient with no image */
+body {
+    background-image: none !important;
+    background: radial-gradient(circle at 30% 20%, #1c0026, #0b0614 70%) !important;
+    color: var(--text-light);
+    font-family: 'Poppins', sans-serif;
+}
+
+/* Headers adopt spooky fonts and glowing effect */
+h1, h2, h3 {
+    font-family: 'Nosifer', cursive;
+    color: var(--amazon-orange);
+    text-shadow: 0 0 10px var(--amazon-orange), 0 0 30px #6a00ff;
+}
+
+/* Spooky banner that is dynamically inserted via JavaScript */
+#halloween-banner {
+    position: fixed;
+    /* Position the banner below the site header to avoid overlapping the Amazon logo */
+    top: 6rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10000;
+    font-family: 'Creepster', cursive;
+    font-size: 2rem;
+    color: var(--amazon-orange);
+    text-shadow: 0 0 10px var(--amazon-orange), 0 0 30px #6a00ff;
+    animation: bannerFloat 4s ease-in-out infinite alternate;
+    pointer-events: none;
+}
+
+@keyframes bannerFloat {
+    from {
+        transform: translateX(-50%) translateY(0);
+        text-shadow: 0 0 10px var(--amazon-orange);
+    }
+    to {
+        transform: translateX(-50%) translateY(-10px);
+        text-shadow: 0 0 15px #6a00ff;
+    }
+}
+
+/* Ensure ghosts, bats, fog and lightning elements sit above content but below modals */
+.ghost, .bat, .fog-layer, .lightning {
+    pointer-events: none;
 }
