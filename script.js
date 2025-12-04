@@ -569,10 +569,39 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
 
         if (waveButtonsContainer) {
             waveButtonsContainer.innerHTML = '';
-            uniqueStartTimes.forEach(time => {
+            
+            // Helper function to check if a time matches our specific times list
+            const matchesSpecificTime = (timeStr) => {
+                // Specific times we want to show (24-hour format)
+                const specificTimes = ['8:40', '9:00', '9:20', '9:40', '10:40', '11:00', '11:20', '11:40', '12:00', '12:20', '12:40', '13:00'];
+                
+                // Extract just the time part (ignore am/pm) from the data
+                const timeOnly = timeStr.toLowerCase().replace(/\s*(am|pm)\s*/g, '').trim();
+                
+                // Check if this time matches any of our specific times
+                for (const specificTime of specificTimes) {
+                    const [h, m] = specificTime.split(':');
+                    // Check both with and without leading zero
+                    if (timeOnly === specificTime || timeOnly === h.padStart(2, '0') + ':' + m) {
+                        return true;
+                    }
+                }
+                return false;
+            };
+            
+            // Filter uniqueStartTimes to only include our specific times
+            const filteredTimes = uniqueStartTimes.filter(time => matchesSpecificTime(time));
+            
+            filteredTimes.forEach(time => {
+                const data = startTimeData[time];
+                const scannedCount = data ? data.checkedIn : 0;
+                const totalCount = data ? data.total : 0;
+                
                 const btn = document.createElement('button');
                 btn.className = 'wave-btn';
-                btn.innerText = time;
+                // Display the time without am/pm and show the count below
+                const displayTime = time.toLowerCase().replace(/\s*(am|pm)\s*/g, '').trim();
+                btn.innerHTML = `${displayTime}<br><span style="font-size: 0.85em;">${scannedCount}/${totalCount}</span>`;
                 btn.setAttribute('data-time', time);
                 btn.addEventListener('click', () => {
                     selectedStartTime = time;
@@ -584,8 +613,8 @@ function initializeStationPageLogic(stationPageWrapper, stationId) {
 
             // FIX: More robustly handle the selected start time. If the previously selected
             // time no longer exists, default to the first available one.
-            if (!uniqueStartTimes.includes(selectedStartTime) && uniqueStartTimes.length > 0) {
-                selectedStartTime = uniqueStartTimes[0];
+            if (!filteredTimes.includes(selectedStartTime) && filteredTimes.length > 0) {
+                selectedStartTime = filteredTimes[0];
             }
             
             // Always update the UI after a data change
